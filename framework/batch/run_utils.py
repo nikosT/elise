@@ -1,21 +1,25 @@
-from datetime import timedelta
-from cProfile import Profile
 import json
-import io
 import os
 import plotly.graph_objects as go
 from plotly.io import from_json
-import pstats
 import sys
 from time import time
 from types import MethodType
-import socket
+from typing import TYPE_CHECKING
 
 sys.path.append(os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..")
 ))
 
+if TYPE_CHECKING:
+    from realsim.database import Database
+    from realsim.compengine import ComputeEngine
+    from realsim.cluster.cluster import Cluster
+    from realsim.scheduler.scheduler import Scheduler
+    from realsim.logger.logger import Logger
+
 from common.utils import define_logger, handler_and_formatter, envvar_bool_val, profiling_ctx
+from common.communication import create_tcp_socket, send_tcp_msg
 logger = define_logger()
 
 def __get_gantt_representation(self):
@@ -148,18 +152,24 @@ def patch(evt_logger, extra_features):
         evt_logger.get_workload = MethodType(__get_workload, evt_logger)
         evt_logger.get_animated_cluster = MethodType(__get_animated_cluster, evt_logger)
 
-def pad_message(msg):
-    DEFAULT_MSG_LEN = 1024
-    return msg + b'\0' * (DEFAULT_MSG_LEN- len(msg))
 
 def single_simulation(sim_batch, server_ipaddr, server_port, webui=False):
     """The function that defines the simulation loop and actions
     """
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect((server_ipaddr, server_port))
-    sock.setblocking(False)
+    # Create a TCP socket to communicate with the progress server
+    sock = create_tcp_socket(server_ipaddr, server_port, blocking=False)
 
+    sim_idx: int
+    inp_idx: int
+    sched_idx: int
+    database: Database
+    cluster: Cluster
+    scheduler: Scheduler
+    evt_logger: Logger
+    compengine: ComputeEngine
+    actions: list
+    extra_features: list
     sim_idx, inp_idx, sched_idx, database, cluster, scheduler, evt_logger, compengine, actions, extra_features = sim_batch
 
     comp_logger = logger.getChild("compengine")
@@ -181,6 +191,7 @@ def single_simulation(sim_batch, server_ipaddr, server_port, webui=False):
     
     with profiling_ctx(sim_idx, scheduler.name, logger):
 
+        # THE SIMULATION LOOP
         while database.preloaded_queue != [] or cluster.waiting_queue != [] or cluster.execution_list != []:
             try:
                 compengine.sim_step()
@@ -188,43 +199,29 @@ def single_simulation(sim_batch, server_ipaddr, server_port, webui=False):
                 logger.exception("An error occurred during the execution of the simulation")
 
             progress_perc = 100 * (1 - (len(database.preloaded_queue) + len(cluster.waiting_queue) + len(cluster.execution_list)) / total_jobs)
-            msg_to_send = pad_message(json.dumps( {"sim_id": sim_idx, "progress_perc": progress_perc} ).encode())
-            try:
-                sock.send(msg_to_send)
-            except:
-                logger.exception("The socket couldn't connect to the progress server. It will be reconnecting")
-                sock.close()
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.connect((server_ipaddr, server_port))
-                sock.setblocking(False)
+            sock = send_tcp_msg(sock, msg={"sim_id": sim_idx, "progress_perc": progress_perc}, json_fmt=True, reconnect_on_failure=True)
+            if sock is None:
+                logger.critical("Can't connect to progress server.")
+
     
     # Calculate the real time and simulated time
     real_time = time() - start_time
     sim_time = cluster.makespan
 
     # Send the times back to the progress server
-    msg_to_send = pad_message(json.dumps( {"sim_id": sim_idx, "inp_id": inp_idx, "sched_id": sched_idx, "scheduler": scheduler.name, "real_time": real_time, "sim_time": sim_time} ).encode())
-    sock.send(msg_to_send)
-
-    # Close communication socket
-    sock.close()
-
-    # If executed by WebUI
-    # data = {
-    #     # Graphs
-    #     "Gantt diagram": evt_logger.get_gantt_representation(),
-    #     "Unused cores": evt_logger.get_unused_cores_graph(),
-    #     "Jobs throughput": evt_logger.get_jobs_throughput(),
-    #     "Waiting queue": evt_logger.get_waiting_queue_graph(),
-    #     ### "Resource usage": logger.get_resource_usage(),
-    #     ### "Jobs utilization": evt_logger.get_jobs_utilization(default_evt_logger),
-    #     ### "Cluster history": evt_logger.get_animated_cluster(),
-        
-    #     # Extra metrics
-    #     ## "Makespan speedup": default_cluster_makespan / cluster.makespan,
-    #     "input": evt_logger.get_input()
-    # }
-
+    send_tcp_msg(
+        sock, 
+        msg={
+            "sim_id": sim_idx, 
+            "inp_id": inp_idx, 
+            "sched_id": sched_idx, 
+            "scheduler": scheduler.name, 
+            "real_time": real_time, 
+            "sim_time": sim_time
+        },
+        json_fmt=True,
+        close_on_sent=True
+    )
 
     # If there are actions provided for this rank
     if actions != []:

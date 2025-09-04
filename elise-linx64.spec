@@ -1,39 +1,39 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-import os
-conda_path = str(os.environ["CONDA_PREFIX"])
-print(conda_path)
+# Imports
+from PyInstaller.utils.hooks import collect_all
+
+# Get tzdata
+tz_data, tz_bins, tz_hi = collect_all('tzdata')
+
+# Get dash_extensions
+dash_ext_data, dash_ext_bins, dash_ext_hi = collect_all('dash_extensions')
+
+# All lib scripts
+elise_lib_scripts = [
+    ('api/loader/*.py', 'api/loader'),
+    ('framework/batch/*.py', 'batch'),
+    ('framework/common/*.py', 'common'),
+    ('framework/webui/ws_server.py', 'webui'),
+    ('framework/webui/assets', 'webui/assets'),
+    ('framework/realsim/*.py', 'realsim'),
+    ('framework/realsim/cluster/*.py', 'realsim/cluster'),
+    ('framework/realsim/jobs/*.py', 'realsim/jobs'),
+    ('framework/realsim/generators/*.py', 'realsim/generators'),
+    ('framework/realsim/generators/distribution/*.py', 'realsim/generators/distribution'),
+    ('framework/realsim/scheduler/*.py', 'realsim/scheduler'),
+    ('framework/realsim/scheduler/schedulers/*.py', 'realsim/scheduler/schedulers'),
+    ('framework/realsim/scheduler/coschedulers/ranks/*.py', 'realsim/scheduler/coschedulers/ranks'),
+    ('framework/realsim/scheduler/coschedulers/rulebased/*.py', 'realsim/scheduler/coschedulers/rulebased'),
+    ('framework/realsim/logger/*.py', 'realsim/logger')
+]
 
 entry_a = Analysis(
     ['framework/elise.py'],
     pathex=['.', 'framework/realsim'],
-    binaries=[],
-    datas=[
-        (f"{conda_path}/lib/python3.13/site-packages/dash_extensions/package-info.json", 'dash_extensions'),
-        (f"{conda_path}/lib/python3.13/site-packages/dash_extensions/dash_extensions.js", 'dash_extensions'),
-        ('api/loader/*.py', 'api/loader'),
-        ('framework/batch/*.py', 'batch'),
-        ('framework/common/*.py', 'common'),
-        ('framework/webui/ws_server.py', 'webui'),
-        ('framework/webui/assets', 'webui/assets'),
-        ('framework/realsim/*.py', 'realsim'),
-        ('framework/realsim/cluster/*.py', 'realsim/cluster'),
-        ('framework/realsim/jobs/*.py', 'realsim/jobs'),
-        ('framework/realsim/generators/*.py', 'realsim/generators'),
-        ('framework/realsim/generators/distribution/*.py', 'realsim/generators/distribution'),
-        ('framework/realsim/scheduler/*.py', 'realsim/scheduler'),
-        ('framework/realsim/scheduler/schedulers/*.py', 'realsim/scheduler/schedulers'),
-        ('framework/realsim/scheduler/coschedulers/ranks/*.py', 'realsim/scheduler/coschedulers/ranks'),
-        ('framework/realsim/scheduler/coschedulers/rulebased/*.py', 'realsim/scheduler/coschedulers/rulebased'),
-        ('framework/realsim/logger/*.py', 'realsim/logger')
-    ],
-    hiddenimports=[
-        'mpi4py', 
-        'procset', 
-        'websockets',
-        'websocket',
-        'kaleido'
-    ],
+    binaries=tz_bins+dash_ext_bins,
+    datas=tz_data+dash_ext_data+elise_lib_scripts,
+    hiddenimports=tz_hi+dash_ext_hi+['mpi4py', 'procset', 'websockets', 'websocket', 'kaleido'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -45,23 +45,9 @@ entry_a = Analysis(
 run_mpi_a = Analysis(
     ['framework/batch/run_mpi.py'],
     pathex=['.', 'framework/realsim'],
-    binaries=[],
-    datas=[
-        ('framework/common/*.py', 'common'),
-        ('framework/realsim/*.py', 'realsim'),
-        ('framework/realsim/cluster/*.py', 'realsim/cluster'),
-        ('framework/realsim/jobs/*.py', 'realsim/jobs'),
-        ('framework/realsim/generators/*.py', 'realsim/generators'),
-        ('framework/realsim/generators/distribution/*.py', 'realsim/generators/distribution'),
-        ('framework/realsim/scheduler/*.py', 'realsim/scheduler'),
-        ('framework/realsim/scheduler/schedulers/*.py', 'realsim/scheduler/schedulers'),
-        ('framework/realsim/scheduler/coschedulers/ranks/*.py', 'realsim/scheduler/coschedulers/ranks'),
-        ('framework/realsim/scheduler/coschedulers/rulebased/*.py', 'realsim/scheduler/coschedulers/rulebased'),
-        ('framework/realsim/logger/*.py', 'realsim/logger')
-    ],
-    hiddenimports=[
-        'mpi4py'
-    ],
+    binaries=tz_bins,
+    datas=tz_data+elise_lib_scripts,
+    hiddenimports=tz_hi+['mpi4py'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -73,21 +59,9 @@ run_mpi_a = Analysis(
 run_mp_a = Analysis(
     ['framework/batch/run_mp.py'],
     pathex=['.', 'framework/realsim'],
-    binaries=[],
-    datas=[
-        ('framework/common/*.py', 'common'),
-        ('framework/realsim/*.py', 'realsim'),
-        ('framework/realsim/cluster/*.py', 'realsim/cluster'),
-        ('framework/realsim/jobs/*.py', 'realsim/jobs'),
-        ('framework/realsim/generators/*.py', 'realsim/generators'),
-        ('framework/realsim/generators/distribution/*.py', 'realsim/generators/distribution'),
-        ('framework/realsim/scheduler/*.py', 'realsim/scheduler'),
-        ('framework/realsim/scheduler/schedulers/*.py', 'realsim/scheduler/schedulers'),
-        ('framework/realsim/scheduler/coschedulers/ranks/*.py', 'realsim/scheduler/coschedulers/ranks'),
-        ('framework/realsim/scheduler/coschedulers/rulebased/*.py', 'realsim/scheduler/coschedulers/rulebased'),
-        ('framework/realsim/logger/*.py', 'realsim/logger')
-    ],
-    hiddenimports=[],
+    binaries=tz_bins,
+    datas=tz_data+elise_lib_scripts,
+    hiddenimports=tz_hi,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -99,15 +73,9 @@ run_mp_a = Analysis(
 progress_server_a = Analysis(
     ['framework/batch/progress_server.py'],
     pathex=[],
-    binaries=[],
-    datas=[
-        ('framework/common/*.py', 'common'),
-    ],
-    hiddenimports=[
-        'cProfile',
-        'platform',
-        'psutil'
-    ],
+    binaries=tz_bins,
+    datas=tz_data+[('framework/common/*.py', 'common'),],
+    hiddenimports=tz_hi+['cProfile', 'platform', 'psutil'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -119,9 +87,9 @@ progress_server_a = Analysis(
 ws_server_a = Analysis(
     ['framework/webui/ws_server.py'],
     pathex=[],
-    binaries=[],
-    datas=[],
-    hiddenimports=[],
+    binaries=tz_bins,
+    datas=tz_data,
+    hiddenimports=tz_hi,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
