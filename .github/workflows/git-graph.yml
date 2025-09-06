@@ -1,0 +1,33 @@
+name: Generate Git Graph
+
+on:
+  workflow_dispatch:  # Allows manual triggering
+  # push:
+  #   branches:
+  #     - main  # Uncomment this line to enable automatic triggering on commits
+  # schedule:
+  #   - cron: '0 * * * *'  # Uncomment this line to enable scheduled runs
+
+jobs:
+  generate-graph:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Install Graphviz
+        run: sudo apt-get install graphviz
+
+      - name: Generate Git Graph
+        run: |
+          git log --graph --oneline --all > git_graph.txt
+          dot -Tpng git_graph.txt -o git_graph.png
+
+      - name: Upload to Discord
+        uses: fjogeleit/http-request-action@v1.1.0
+        with:
+          url: ${{ secrets.DISCORD_GIT_GRAPH_WEBHOOK }}
+          method: POST
+          headers: '{"Content-Type": "application/json"}'
+          data: '{"content": "New Git Graph", "embeds": [{"image": {"url": "attachment://git_graph.png"}}]}'
+          files: '{"git_graph.png": "git_graph.png"}'
