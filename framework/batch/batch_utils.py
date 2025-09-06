@@ -40,6 +40,12 @@ from realsim.database import Database
 # Cluster
 from realsim.cluster.cluster import Cluster
 
+# Generators
+from realsim.generators.AGenerator import AbstractGenerator
+
+# Distributions
+from realsim.generators.distribution.idistribution import IDistribution
+
 # Schedulers
 from realsim.scheduler.scheduler import Scheduler
 

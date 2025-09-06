@@ -12,7 +12,7 @@ sys.path.append(os.path.abspath(
 ))
 from realsim.generators.AGenerator import AbstractGenerator
 
-from .__init__ import *
+from realsim.generators import *
 from math import inf
 
 T = TypeVar("T")

@@ -5,7 +5,7 @@ from time import time_ns
 from typing import TypeVar, Generic
 from collections.abc import Callable
 
-from .__init__ import *
+from realsim.generators import *
 from math import inf
 
 T = TypeVar("T")
