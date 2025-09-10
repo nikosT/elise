@@ -16,7 +16,6 @@ sys.path.append(os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..")
 ))
 from common import utils as cutils
-from webui.ws_server import main as ws_server_main
 from webui.layouts.main import main_layout
 from webui.utils.action_utils import action_item_name, action_items_names
 

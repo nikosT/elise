@@ -36,7 +36,10 @@ def get_ancestry_tree() -> list[str]:
 
 def handler_and_formatter(logger: logging.Logger):
 
-    file_handler = logging.FileHandler(filename=f"log_{logger.name}_{socket.gethostname()}_{os.getpid()}", mode="a", encoding="utf-8")
+    debugs_dir = os.environ.get("ELiSE_DEBUG_DIR", "debugs")
+    os.makedirs(debugs_dir, exist_ok=True)
+
+    file_handler = logging.FileHandler(filename=f"{debugs_dir}/log_{logger.name}_{socket.gethostname()}_{os.getpid()}", mode="a", encoding="utf-8")
     file_formatter = logging.Formatter(fmt="[%(levelname)s] {%(thread)s} (%(asctime)s) - %(filename)s:%(funcName)s - %(message)s",
                                       datefmt="%Y-%m-%d %H:%M:%S")
     file_handler.setFormatter(file_formatter)

@@ -66,14 +66,14 @@ def calculate_for_less_avail_cores(sim_configs_num: int, avail_cores: int) -> tu
 
     return total_procs, batch_size
 
-def spawn_progress_server(server_ipaddr: str, server_port: int, connections: int, export_reports: str, webui: bool) -> subprocess.Popen:
+def spawn_progress_server(server_ipaddr: str, server_port: int, clients: int, export_reports: str, webui: bool) -> subprocess.Popen:
     """
     Starts a progress server process.
 
     Args:
         server_ipaddr (str): The IP address of the server.
         server_port (int): The port number of the server.
-        connections (int): The maximum number of simulation configurations to connect to the server.
+        clients (int): The maximum number of simulation configurations to connect to the server.
 
     Returns:
         subprocess.Popen: A Popen object representing the progress server process.
@@ -81,8 +81,8 @@ def spawn_progress_server(server_ipaddr: str, server_port: int, connections: int
     Example:
         >>> server_ipaddr = "localhost"
         >>> server_port = 8080
-        >>> connections = 100
-        >>> sim_progress_proc = spawn_progress_server(server_ipaddr, server_port, connections)
+        >>> clients = 100
+        >>> sim_progress_proc = spawn_progress_server(server_ipaddr, server_port, clients)
     """
     logger.debug(f"Starting progress server process")
     
@@ -95,7 +95,7 @@ def spawn_progress_server(server_ipaddr: str, server_port: int, connections: int
     exe = get_executable(progress_server_path)
 
     # Create a command to run the "progress_server.py" script, passing in the required arguments
-    server_prog_cmd = exe + ["--server_ipaddr", server_ipaddr, "--server_port", str(server_port), "--connections", str(connections)]
+    server_prog_cmd = exe + ["--server_ipaddr", server_ipaddr, "--tcp_server_port", str(server_port), "--clients", str(clients)]
     
     # If export_reports is True, add an argument to export reports
     if export_reports:

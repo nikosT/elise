@@ -20,21 +20,11 @@ from webui.utils.results_utils import get_experiment_results
 
 # elise library dipendencies
 from batch.submit import execute_simulation
+from common.communication import get_ip
 
-def get_ip():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.settimeout(0)
-    try:
-        # doesn't even have to be reachable
-        s.connect(('10.254.254.254', 1))
-        IP = s.getsockname()[0]
-    except Exception:
-        IP = '127.0.0.1'
-    finally:
-        s.close()
-    return IP
 ws_ipaddr = get_ip()
-app_progress_report = WebSocket(id="app-progress-report", url=f"ws://{ws_ipaddr}:55500")
+ws_url = f"ws://{ws_ipaddr}:55500"
+app_progress_report = WebSocket(id="app-progress-report", url=ws_url)
 progress_finished = dbc.Alert("The simulation has finished", id="execute-simulation-alert", duration=5000, is_open=False)
 progress_bar = dbc.Alert([
     html.H2("Simulation Progress"),
