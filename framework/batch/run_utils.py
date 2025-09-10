@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from realsim.logger.logger import Logger
 
 from common.utils import define_logger, handler_and_formatter, envvar_bool_val, profiling_ctx
-from common.communication import create_tcp_socket, send_tcp_msg
+from common.communication import TCPSocket
 logger = define_logger()
 
 def __get_gantt_representation(self):
@@ -158,7 +158,7 @@ def single_simulation(sim_batch, server_ipaddr, server_port, webui=False):
     """
 
     # Create a TCP socket to communicate with the progress server
-    sock = create_tcp_socket(server_ipaddr, server_port, blocking=False)
+    sock = TCPSocket(server_ipaddr, server_port).client().nonblocking()
 
     sim_idx: int
     inp_idx: int
@@ -199,9 +199,9 @@ def single_simulation(sim_batch, server_ipaddr, server_port, webui=False):
                 logger.exception("An error occurred during the execution of the simulation")
 
             progress_perc = 100 * (1 - (len(database.preloaded_queue) + len(cluster.waiting_queue) + len(cluster.execution_list)) / total_jobs)
-            sock = send_tcp_msg(sock, msg={"sim_id": sim_idx, "progress_perc": progress_perc}, json_fmt=True, reconnect_on_failure=True)
-            if sock is None:
-                logger.critical("Can't connect to progress server.")
+            sock.send(msg={"sim_id": sim_idx, "progress_perc": progress_perc}, json_fmt=True, reconnect_on_failure=True)
+            # if sock.ref. is None:
+            #     logger.critical("Can't connect to progress server.")
 
     
     # Calculate the real time and simulated time
@@ -209,8 +209,7 @@ def single_simulation(sim_batch, server_ipaddr, server_port, webui=False):
     sim_time = cluster.makespan
 
     # Send the times back to the progress server
-    send_tcp_msg(
-        sock, 
+    sock.send(
         msg={
             "sim_id": sim_idx, 
             "inp_id": inp_idx, 

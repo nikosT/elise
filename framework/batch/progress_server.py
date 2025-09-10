@@ -7,47 +7,49 @@ import select
 import socket
 import sys
 import tabulate
+from time import time
+import threading
+from websocket import create_connection
+from websockets.sync.server import serve
 
 sys.path.append(os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..")
 ))
 
-from common.utils import define_logger, pad_message
+from common.communication import TCPSocket, pad_message
+from common.utils import define_logger
 
 logger = define_logger()
 
-def progress_server(server_ipaddr="127.0.0.1", server_port=54321, connections=5, export_reports="", webui=False):
 
-    # Create a socket and set options for resusable ip address
-    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+def progress_server(server_ipaddr: str, server_port: int, clients: int, export_reports="", webui=False):
 
-    # Bind socket to the given ip address and port
-    server_sock.bind((server_ipaddr, server_port))
+    logger.debug("Starting the Progress Server.")
 
-    # Listen to incoming connections
-    server_sock.listen(connections)
+    # Create a reusable, listening socket for the progress server
+    server_sock = TCPSocket(server_ipaddr, server_port).reusable().server()
 
     # List of current available open sockets
-    current_sockets = [server_sock]
+    current_sockets = [server_sock.ref]
 
-    # Remaining connections
-    rem_connections = connections
+    # Remaining clients
+    rem_clients = clients
 
-    # Progress for all connections
-    progress_list = [0] * connections
+    # Progress for all clients
+    progress_list = [0] * clients
     
     # Time reports list of tuples(id, scheduler name, real time, simulated time, time ratio)
     time_reports_list: list[tuple[int, str, str, str, str]] = list()
     
     if webui:
-        print("Establishing connection to WebUI")
+        logger.debug("Progress server established connection to WebUI.")
         webui_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         webui_socket.connect(("127.0.0.1", 55501))
     
     while True:
 
-        overall_progress = sum(progress_list) / connections
+        # Average progress for all clients (= simulation runs)
+        overall_progress = sum(progress_list) / clients if clients > 0 else 0.0
         
         if webui:
             webui_socket.send(pad_message(str(overall_progress).encode("utf-8")))
@@ -55,9 +57,9 @@ def progress_server(server_ipaddr="127.0.0.1", server_port=54321, connections=5,
             # Stdout print of overall progress
             print(f"\rOverall Progress: {overall_progress:.2f}%", end="")
 
-        # If the remaining connections is zero and the only socket left is the
+        # If the remaining clients is zero and the only socket left is the
         # server then shutdown the progress server
-        if rem_connections <= 0 and len(current_sockets) == 1 and current_sockets[0] == server_sock:
+        if rem_clients <= 0 and len(current_sockets) == 1 and current_sockets[0] == server_sock.ref:
             break
 
         # Select/poll from current_sockets
@@ -66,10 +68,9 @@ def progress_server(server_ipaddr="127.0.0.1", server_port=54321, connections=5,
         for notified_socket in read_sockets:
 
             # If a new connection arrives
-            if notified_socket == server_sock:
+            if notified_socket == server_sock.ref:
 
-                client_sock, client_ipaddr = server_sock.accept()
-                # print(f"New connection coming from {client_ipaddr}")
+                client_sock, client_ipaddr = server_sock.ref.accept()
                 current_sockets.append(client_sock)
 
             # A message arrived from a client socket
@@ -79,11 +80,10 @@ def progress_server(server_ipaddr="127.0.0.1", server_port=54321, connections=5,
 
                 # The client has finished execution and exited
                 if not msg:
-                    # print(f"Closed connection from {notified_socket.getpeername()}")
                     current_sockets.remove(notified_socket)
                     notified_socket.close()
-                    # Decrease the amount of remaining socket connections to be fullfilled
-                    rem_connections -= 1
+                    # Decrease the amount of remaining socket clients to be fullfilled
+                    rem_clients -= 1
 
                 # If the client has given new information about their progress
                 else:
@@ -154,23 +154,24 @@ def progress_server(server_ipaddr="127.0.0.1", server_port=54321, connections=5,
         webui_socket.close()
 
     # Close the server socket
-    server_sock.close()
+    del server_sock
+
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(prog="progress_server", description="A server process to monitor the progress of each simulation")
     parser.add_argument("--server_ipaddr", type=str, required=True)
-    parser.add_argument("--server_port", type=int, default=54321)
-    parser.add_argument("--connections", type=int, required=True)
+    parser.add_argument("--tcp_server_port", type=int, default=54321)
+    parser.add_argument("--clients", type=int, required=True)
     parser.add_argument("--export_reports", default="", type=str, help="Provde a directory to export reports for each scheduler")
     parser.add_argument("--webui", default=False, action="store_true")
 
     args = parser.parse_args()
 
     host_ipaddr = args.server_ipaddr
-    port = args.server_port
-    connections = args.connections
+    tcp_port = args.tcp_server_port
+    clients = args.clients
     export_reports = args.export_reports
     webui = args.webui
-    
-    progress_server(host_ipaddr, port, connections, export_reports, webui)
+
+    progress_server(host_ipaddr, tcp_port, clients, export_reports, webui)
