@@ -8,6 +8,7 @@ import inspect
 import os
 import sys
 from typing import Any
+from uuid import uuid4
 
 # Introduce path to realsim
 sys.path.append(os.path.abspath(
@@ -154,12 +155,14 @@ class BatchCreator:
 
             self.config = safe_load(fd)
             
-            sanity_entries = ["name", "inputs", "schedulers", "actions"]
+            sanity_entries = ["inputs", "schedulers", "actions"]
 
             if list(filter(lambda x: x not in self.config, sanity_entries)):
                 raise RuntimeError("The configuration file is not properly designed")
 
-            self.__schematic_name = self.config["name"]
+            self.__schematic_name = self.config.get("name", str(uuid4()))
+            if self.__schematic_name == "":
+                self.__schematic_name = str(uuid4())
             self.__schematic_inputs = self.config["inputs"]
             self.__schematic_schedulers = self.config["schedulers"]
             self.__schematic_actions = self.config["actions"] if "actions" in self.config else dict()
@@ -171,6 +174,10 @@ class BatchCreator:
             inputs_num += 1 if "repeat" not in input else int(input["repeat"])
 
         return inputs_num * len(self.__schematic_schedulers)
+    
+    @property
+    def batch_id(self):
+        return self.__schematic_name
     
 
     def __get_class_from_file(self, file: str, root_cls: object, export_module: bool = False) -> object:
@@ -313,7 +320,7 @@ class BatchCreator:
                     #     gen_input = gen_inst.generate_jobs_set(gen_arg)
 
 
-                    logger.debug(f"Finished generating the input.")
+                    logger.debug(f"Finished generating the workload.")
 
                     # Check if a transformer distribution is provided by the user
                     if "distribution" in generator:
@@ -331,7 +338,7 @@ class BatchCreator:
                         distr_inst = distr_cls()
                         distr_inst.apply_distribution(gen_input, time_step=distr_arg)
 
-                        logger.debug(f"A distribution was applied to the input: {distr_inst.name}.")
+                        logger.debug(f"A distribution was applied to the workload: {distr_inst.name}.")
 
             else:
                 raise RuntimeError("A generator was not provided")
@@ -454,6 +461,7 @@ class BatchCreator:
         logger.debug(f"Finished processing the postprocessing actions: {self.__extra_features}")
 
     def create_ranks(self) -> None:
+
         self.process_inputs()
         self.process_schedulers()
         self.process_actions()
@@ -489,6 +497,6 @@ class BatchCreator:
                 # Set actions for this simulation
                 actions = self.__actions[input_index][sched_index]
 
-                self.ranks.append((sim_idx, input_index, sched_index, database, cluster, scheduler, evt_logger, compengine, actions, self.__extra_features))
+                self.ranks.append((self.batch_id, sim_idx, input_index, sched_index, database, cluster, scheduler, evt_logger, compengine, actions, self.__extra_features))
 
                 sim_idx += 1

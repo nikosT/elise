@@ -49,7 +49,7 @@ def main():
 
     # Commandline
     supported_providers = ["openmpi", "intelmpi", "mp"]
-    parser.add_argument("-f", "--schematic-file", help="Provide a schematic file name")
+    parser.add_argument("-f", "--schematic-files", action="append", help="Provide a schematic file name")
     parser.add_argument("-p", "--provider", choices=supported_providers, default="mp", help="Define the provider for parallelizing tasks")
     parser.add_argument("--export_reports", default="", type=str, help="Provde a directory to export reports for each scheduler")
     
@@ -57,10 +57,11 @@ def main():
 
     if args.webui:
         run_webui()
-    elif not args.schematic_file:
+    elif not args.schematic_files:
         run_gui()
     else:
-        cmdargs = ["-f", args.schematic_file, "-p", args.provider]
+        cmdargs = [f"-f {file}" for file in args.schematic_files]
+        cmdargs.extend(["-p", args.provider])
         if args.export_reports:
             cmdargs.extend(["--export_reports", args.export_reports])
         run_cmdline(cmdargs)

@@ -160,6 +160,7 @@ def single_simulation(sim_batch, server_ipaddr, server_port, webui=False):
     # Create a TCP socket to communicate with the progress server
     sock = TCPSocket(server_ipaddr, server_port).client().nonblocking()
 
+    batch_id: str
     sim_idx: int
     inp_idx: int
     sched_idx: int
@@ -170,7 +171,7 @@ def single_simulation(sim_batch, server_ipaddr, server_port, webui=False):
     compengine: ComputeEngine
     actions: list
     extra_features: list
-    sim_idx, inp_idx, sched_idx, database, cluster, scheduler, evt_logger, compengine, actions, extra_features = sim_batch
+    batch_id, sim_idx, inp_idx, sched_idx, database, cluster, scheduler, evt_logger, compengine, actions, extra_features = sim_batch
 
     comp_logger = logger.getChild("compengine")
     if envvar_bool_val("ELiSE_DEBUG"):
@@ -199,7 +200,7 @@ def single_simulation(sim_batch, server_ipaddr, server_port, webui=False):
                 logger.exception("An error occurred during the execution of the simulation")
 
             progress_perc = 100 * (1 - (len(database.preloaded_queue) + len(cluster.waiting_queue) + len(cluster.execution_list)) / total_jobs)
-            sock.send(msg={"sim_id": sim_idx, "progress_perc": progress_perc}, json_fmt=True, reconnect_on_failure=True)
+            sock.send(msg={"type": "Progress", "batch_id": batch_id, "sim_id": sim_idx, "progress_perc": progress_perc}, json_fmt=True, reconnect_on_failure=True)
             # if sock.ref. is None:
             #     logger.critical("Can't connect to progress server.")
 
@@ -211,6 +212,8 @@ def single_simulation(sim_batch, server_ipaddr, server_port, webui=False):
     # Send the times back to the progress server
     sock.send(
         msg={
+            "type": "ProgressEnd",
+            "batch_id": batch_id,
             "sim_id": sim_idx, 
             "inp_id": inp_idx, 
             "sched_id": sched_idx, 
