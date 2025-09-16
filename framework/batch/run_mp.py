@@ -9,6 +9,7 @@ sys.path.append(os.path.abspath(
 ))
 
 from batch.batch_utils import BatchCreator
+from common.communication import TCPSocket
 from common.utils import define_logger
 from run_utils import multiple_simulations
 
@@ -29,6 +30,10 @@ if __name__ == "__main__":
     batch_creator = BatchCreator(schematic_file_path, webui)
     batch_creator.create_ranks()
 
+    logger.debug("Notify progress server for new batch of sim configs.")
+    prog_sock = TCPSocket(server_ipaddr, server_port).reusable().client()
+    prog_sock.send(msg={"type": "BatchStart", "batch_id": batch_creator.batch_id, "#configs": str(total_procs)}, json_fmt=True)
+    # TODO: Should check if the project name == batch id is unique
 
     logger.debug(f"Creating a process pool of {total_procs} max workers")
     executor = ProcessPoolExecutor(max_workers=total_procs)
@@ -42,3 +47,6 @@ if __name__ == "__main__":
     logger.debug(f"Waiting for the processes to finish")
     executor.shutdown(wait=True)
     logger.debug(f"The processes have finished without any errors")
+
+    # Wait for the termination/confirmation from the progress server
+    prog_sock.ref.recv(1)

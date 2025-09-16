@@ -66,7 +66,7 @@ def calculate_for_less_avail_cores(sim_configs_num: int, avail_cores: int) -> tu
 
     return total_procs, batch_size
 
-def spawn_progress_server(server_ipaddr: str, server_port: int, clients: int, export_reports: str, webui: bool) -> subprocess.Popen:
+def spawn_progress_server(server_ipaddr: str, server_port: int, batches: int, export_reports: str, webui: bool) -> subprocess.Popen:
     """
     Starts a progress server process.
 
@@ -95,7 +95,7 @@ def spawn_progress_server(server_ipaddr: str, server_port: int, clients: int, ex
     exe = get_executable(progress_server_path)
 
     # Create a command to run the "progress_server.py" script, passing in the required arguments
-    server_prog_cmd = exe + ["--server_ipaddr", server_ipaddr, "--tcp_server_port", str(server_port), "--clients", str(clients)]
+    server_prog_cmd = exe + ["--server_ipaddr", server_ipaddr, "--tcp_server_port", str(server_port), "--batches", str(batches)]
     
     # If export_reports is True, add an argument to export reports
     if export_reports:
@@ -207,8 +207,8 @@ def execute_simulation(cmdargs=None):
     # Current supported providers. Might need to specify different MPI vendors (OpenMPI, IntelMPI)
     supported_providers = ["openmpi", "intelmpi", "mp"]
 
-    parser = argparse.ArgumentParser(description="Provide a schematic file and a parallelizing provider to run simulations")
-    parser.add_argument("-f", "--schematic-file", help="Provide a schematic file name", required=True)
+    parser = argparse.ArgumentParser(description="Provide a batch schematic file and a parallelizing provider to run simulations")
+    parser.add_argument("-f", "--schematic-files", action="append", help="Provide (a) batch schematic file(s)", required=True)
     parser.add_argument("-p", "--provider", choices=supported_providers, default="mp", help="Define the provider for parallelizing tasks")
     parser.add_argument("--export_reports", default="", type=str, help="Provde a directory to export reports for each scheduler")
     parser.add_argument("--webui", default=False, action="store_true")
@@ -218,29 +218,35 @@ def execute_simulation(cmdargs=None):
     else:
         args = parser.parse_args()
 
-    schematic_file = args.schematic_file
+    schematic_files = args.schematic_files
     provider = args.provider
     export_reports = args.export_reports
     webui = args.webui
 
-    # Calculate the number of needed cores to run all the simulations in parallel
-    batch_creator = BatchCreator(schematic_file)
-
-    sim_configs_num = batch_creator.get_sim_configs_num()
-    logger.debug(f"The total number of simulation configurations is {sim_configs_num}")
 
     # Get the IP address of the local machine that will launch both the progress server and the simulation runs
     # This will be broadcasted to the simulation run workers to report to the progress server
     server_ipaddr, server_port = socket.gethostbyname(socket.gethostname()), 54321
 
     # We first spawn the progress server to listen for connections
-    sim_progress_proc = spawn_progress_server(server_ipaddr, server_port, sim_configs_num, export_reports, webui)
+    sim_progress_proc = spawn_progress_server(server_ipaddr, server_port, len(schematic_files), export_reports, webui)
 
-    # And then spawn the simulation runs
-    sim_run_proc = spawn_simulation_runs(schematic_file, provider, server_ipaddr, server_port, sim_configs_num, webui)
+    # And then spawn the batches
+    sim_run_procs = list()
+    for schematic_file in schematic_files:
+        # Calculate the number of needed cores to run all the simulations in parallel
+        batch_creator = BatchCreator(schematic_file.strip())
 
-    # We first wait for the simulation runs to finish
-    sim_run_proc.wait()
+        sim_configs = batch_creator.get_sim_configs_num()
+        logger.debug(f"The total number of simulation configurations is {sim_configs}")
+
+        sim_run_procs.append(
+            spawn_simulation_runs(schematic_file.strip(), provider, server_ipaddr, server_port, sim_configs, webui)
+        )
+
+    # We first wait for the batches of simulation configs
+    for proc in sim_run_procs:
+        proc.wait()
     logger.debug(f"The simulation runs finished successfully")
 
     # And then for the progress server
