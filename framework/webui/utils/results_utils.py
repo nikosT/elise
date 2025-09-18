@@ -421,7 +421,7 @@ def draw_canvas_scheduler(n_clicks, results_data, schematic_data):
                 for key in row.keys():
                     values = []
                     for other_sched_id, other_tdata in others.items():
-                        values.append(f"{schematic_data_replay["schedulers"][other_sched_id]["name"]}: {other_tdata[i][key]}")
+                        values.append(f"{schematic_data_replay['schedulers'][other_sched_id]['name']}: {other_tdata[i][key]}")
                     row_dict[key] = "".join(values)
                 tooltip.append(row_dict)
             
