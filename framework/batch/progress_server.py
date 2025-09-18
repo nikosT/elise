@@ -12,7 +12,8 @@ sys.path.append(os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..")
 ))
 
-from common.utils import define_logger, pad_message
+from common.utils import define_logger
+from common.communication import pad_message
 
 logger = define_logger()
 
