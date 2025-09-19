@@ -275,6 +275,11 @@ class BatchCreator:
 
             logger.debug(f"Finished calculating the heatmap: {heatmap}")
 
+            # Create cluster
+            nodes = int(input["cluster"]["nodes"])
+            socket_conf = tuple(input["cluster"]["socket-conf"])
+
+
             # Create the input using the generator provided
             if "generator" in input:
                 generator = input["generator"]
@@ -294,7 +299,7 @@ class BatchCreator:
                     repeat = int(input["repeat"])
                 else:
                     repeat = 1
-
+                
                 for _ in range(repeat):
 
                     gen_input = gen_inst.generate_jobs_set(gen_arg)
@@ -332,15 +337,12 @@ class BatchCreator:
                         distr_inst.apply_distribution(gen_input, time_step=distr_arg)
 
                         logger.debug(f"A distribution was applied to the input: {distr_inst.name}.")
+                    
+                    self.__inputs.append((gen_input, heatmap, nodes, socket_conf))
 
             else:
                 raise RuntimeError("A generator was not provided")
 
-            # Create cluster
-            nodes = int(input["cluster"]["nodes"])
-            socket_conf = tuple(input["cluster"]["socket-conf"])
-
-            self.__inputs.append((gen_input, heatmap, nodes, socket_conf))
 
         logger.debug("Finished processing the inputs.")
 
