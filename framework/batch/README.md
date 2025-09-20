@@ -1,4 +1,4 @@
-Schematic File
+Configuration File
 =====================
 
 ## Definition
@@ -62,41 +62,52 @@ actions:
 ## Example
 
 ```yaml
----
-name: "Toy schematic"
-workloads:
-  # Workload based on a Mongo database
-  - &default_workload
-    db: "mongodb+srv://credentials@dbname.hostname.mongodb.net"
-    loads-machine: "machine name"
-    loads-suite: "suite name"
-    # 100 randomly generated jobs
-    generator:
-      type: "Random Generator"
-      arg: 100
-    # A cluster of 8 nodes with 2 NUMA nodes and 12 cores each
-    cluster:
-      nodes: 8
-      socket-conf: [12,12]
-    # Generate 10 similar workloads based on the above configuration
-    repeat: 10
+name: 'My Experiment'
+description: 'Jupyter generated file'
+inputs:
+- cluster:
+    nodes: 420
+    socket-conf:
+    - 10
+    - 10
+  generator:
+    arg: 2
+    type: 'Random Generator'
+  json: "syn_NAS.json"
+  loads-machine: "aris"
+  loads-suite: 'NAS'
+  repeat: 2
 schedulers:
-  default: "EASY Scheduler"
-  others:
-    - "FIFO Scheduler"
-    - "Conservative Scheduler"
-    - "Random Ranks Co-Scheduler"
-    - "<ELiSE home dir>/framework/realsim/scheduler/coschedulers/CustomCoScheduler.py"
-  general-options:
-    backfill_enabled: true
-    compact_fallback: true
+- backfill_enabled: false
+  base: 'FIFO Scheduler'
+  compact_fallback: false
+- backfill_enabled: true
+  base: 'EASY Scheduler'
+  compact_fallback: false
+- backfill_enabled: true
+  base: 'Random Ranks Co-Scheduler'
+  compact_fallback: false
 actions:
   get_workload:
-    workloads: "all"
+    inputs: 'all'
+    schedulers: 'all'
+    dir: "work_100_1758205436"
+  get_gantt_representation:
+    inputs: 'all'
+    schedulers: 'all'
+    dir: "work_100_1758205436"
+  get_waiting_queue:
+    inputs: "all"
     schedulers: "all"
-    workload_dir: "./csvs"
-...
-
+    dir: "work_100_1758205436"
+  get_jobs_throughput:
+    inputs: "all"
+    schedulers: "all"
+    dir: "work_100_1758205436"
+  get_unused_cores:
+    inputs: "all"
+    schedulers: "all"
+    dir: "work_100_1758205436"
 ```
 
 Submit Simulations with ELiSE
