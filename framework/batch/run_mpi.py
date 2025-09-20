@@ -40,7 +40,7 @@ if mpi_rank == 0:
 
     logger.debug("Notify progress server for new batch of sim configs.")
     prog_sock = TCPSocket(server_ipaddr, server_port).reusable().client()
-    prog_sock.send(msg={"type": "BatchStart", "batch_id": batch_creator.batch_id, "#configs": str(total_procs)}, json_fmt=True)
+    prog_sock.send(msg={"type": "BatchStart", "batch_id": batch_creator.batch_id, "#configs": str(total_procs * batch_size)}, json_fmt=True)
     # TODO: Should check if the project name == batch id is unique
 
     if total_procs > 1:
