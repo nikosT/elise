@@ -27,9 +27,100 @@ def __get_gantt_representation(self):
     fig = from_json(res)
     fig.update_layout(width=2048, height=1024)
 
-    output_path = os.path.abspath(f"{self.img_dir}")
+    output_path = os.path.abspath(f"{self.dir}/gantts")
     os.makedirs(output_path, exist_ok=True)
-    fig.write_image(f"{output_path}/input_{self.inp_idx}_{self.scheduler.name.lower().replace(' ', '_')}.png")
+
+    try:
+        fig.write_image(f"{output_path}/sim_{self.sim_idx}_input_{self.inp_idx}_scheduler_{self.sched_idx}.png")
+    except Exception as e:
+        print(e)
+
+def __get_workload(self):
+    res = self.__class__.get_workload(self)
+
+    output_path = os.path.abspath(f"{self.dir}/workloads")
+    os.makedirs(output_path, exist_ok=True)
+
+    try:
+        with open(f"{output_path}/sim_{self.sim_idx}_input_{self.inp_idx}_scheduler_{self.sched_idx}.csv", "w") as fd:
+            fd.write(res)
+    except Exception as e:
+        print(e)
+
+def __get_waiting_queue_graph(self):
+    output_path = os.path.abspath(f"{self.dir}/waiting_queue")
+    os.makedirs(output_path, exist_ok=True)
+    filename = f"{output_path}/sim_{self.sim_idx}_input_{self.inp_idx}_scheduler_{self.sched_idx}.png"
+
+    res = self.__class__.get_waiting_queue_graph(self) # Have to call this way to avoid infinite recursion
+    checks, num_of_jobs = res
+    
+    fig = go.Figure(data=[
+        go.Scatter(x=checks, y=num_of_jobs, mode="lines+markers")
+    ])
+    fig.update_layout({
+        "title": f"<b>Number of jobs inside waiting queue per checkpoint</b><br>{self.scheduler.name}",
+        "title_x": 0.5,
+        'xaxis': {'title': '<b>Time (s)</b>'},
+		'yaxis': {'title': '<b>Number of waiting jobs</b>'}
+    })
+
+    try:
+        fig.write_image(filename)
+    except Exception as e:
+        print(e)
+
+def __get_jobs_throughput_graph(self):
+    output_path = os.path.abspath(f"{self.dir}/jobs_throughput")
+    os.makedirs(output_path, exist_ok=True)
+    filename = f"{output_path}/sim_{self.sim_idx}_input_{self.inp_idx}_scheduler_{self.sched_idx}.png"
+
+    res = self.__class__.get_jobs_throughput(self) # Have to call this way to avoid infinite recursion
+    checks, num_of_jobs = res
+    
+    fig = go.Figure(data=[
+        go.Scatter(x=checks, y=num_of_jobs, mode="lines+markers")
+    ])
+    fig.update_layout({
+        "title": f"<b>Number of finished jobs per checkpoint</b><br>{self.scheduler.name}",
+        "title_x": 0.5,
+        'xaxis': {'title': '<b>Time (s)</b>'},
+		'yaxis': {'title': '<b>Number of finished jobs</b>'}
+    })
+
+    try:
+        fig.write_image(filename)
+    except Exception as e:
+        print(e)
+
+def __get_unused_cores_graph(self):
+    output_path = os.path.abspath(f"{self.dir}/unused_cores")
+    os.makedirs(output_path, exist_ok=True)
+    filename = f"{output_path}/sim_{self.sim_idx}_input_{self.inp_idx}_scheduler_{self.sched_idx}.png"
+
+    res = self.__class__.get_unused_cores_graph(self) # Have to call this way to avoid infinite recursion
+    checks, num_of_cores = res
+    
+    fig = go.Figure(data=[
+        go.Scatter(x=checks, y=num_of_cores, mode="lines+markers")
+    ])
+    fig.update_layout({
+        "title": f"<b>Number of unused cores per checkpoint</b><br>{self.scheduler.name}",
+        "title_x": 0.5,
+        'xaxis': {'title': '<b>Time (s)</b>'},
+		'yaxis': {'title': '<b>Number of unused cores</b>'}
+    })
+
+    try:
+        fig.write_image(filename)
+    except Exception as e:
+        print(e)
+
+def __get_animated_cluster(self):
+    res = self.__class__.get_animated_cluster(self)
+    fig = from_json(res)
+    fig.show()
+
 
 def __get_webui_gantt_representation(self):
     res = self.__class__.get_gantt_representation(self) # Have to call this way to avoid infinite recursion
@@ -48,20 +139,6 @@ def __get_webui_workload(self):
 
     with open(f"{output_path}/input_{self.inp_idx}_scheduler_{self.sched_idx}.csv", "w") as fd:
         fd.write(res)
-
-def __get_workload(self):
-    res = self.__class__.get_workload(self)
-
-    output_path = os.path.abspath(f"{self.workload_dir}")
-    os.makedirs(output_path, exist_ok=True)
-
-    with open(f"{output_path}/workload_{self.sim_id}_{self.scheduler.name.lower().replace(' ', '_')}.csv", "w") as fd:
-        fd.write(res)
-
-def __get_animated_cluster(self):
-    res = self.__class__.get_animated_cluster(self)
-    fig = from_json(res)
-    fig.show()
 
 def __get_webui_waiting_queue_graph(self):
     output_path = os.path.abspath(f"{self.dir}/waiting_queue")
@@ -136,6 +213,7 @@ def __get_webui_animated_cluster(self):
     with open(filename, "w") as fd:
         json.dump(res, fd)
 
+
 def patch(evt_logger, extra_features):
     for arg, val in extra_features:
         evt_logger.__dict__[arg] = val
@@ -150,6 +228,9 @@ def patch(evt_logger, extra_features):
     else:
         evt_logger.get_gantt_representation = MethodType(__get_gantt_representation, evt_logger)
         evt_logger.get_workload = MethodType(__get_workload, evt_logger)
+        evt_logger.get_waiting_queue = MethodType(__get_waiting_queue_graph, evt_logger)
+        evt_logger.get_jobs_throughput = MethodType(__get_jobs_throughput_graph, evt_logger)
+        evt_logger.get_unused_cores = MethodType(__get_unused_cores_graph, evt_logger)
         evt_logger.get_animated_cluster = MethodType(__get_animated_cluster, evt_logger)
 
 

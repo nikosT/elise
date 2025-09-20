@@ -10,6 +10,7 @@ def create_tcp_socket(ip_addr, port, blocking=True):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect((ip_addr, port))
     sock.setblocking(blocking)
+    return sock
 
 def send_tcp_msg(sock: socket.socket, 
                  msg: Any, 
@@ -20,10 +21,11 @@ def send_tcp_msg(sock: socket.socket,
     
     if json_fmt:
         msg = json.dumps(msg)
+    
+    msg = str(msg).encode()
 
     if pad_msg:
         msg = pad_message(msg)
-    msg = msg.encode()
 
     try:
         sock.send(msg)

@@ -10,7 +10,7 @@ import sys
 sys.path.append(os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..")
 ))
-from common.utils import pad_message
+from common.communication import pad_message
 
 def get_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
