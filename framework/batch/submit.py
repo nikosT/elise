@@ -66,7 +66,7 @@ def calculate_for_less_avail_cores(sim_configs_num: int, avail_cores: int) -> tu
 
     return total_procs, batch_size
 
-def spawn_progress_server(server_ipaddr: str, server_port: int, batches: int, export_reports: str, webui: bool) -> subprocess.Popen:
+def spawn_progress_server(server_ipaddr: str, server_port: int, batches: int, webui: bool) -> subprocess.Popen:
     """
     Starts a progress server process.
 
@@ -95,11 +95,7 @@ def spawn_progress_server(server_ipaddr: str, server_port: int, batches: int, ex
     exe = get_executable(progress_server_path)
 
     # Create a command to run the "progress_server.py" script, passing in the required arguments
-    server_prog_cmd = exe + ["--server_ipaddr", server_ipaddr, "--tcp_server_port", str(server_port), "--batches", str(batches)]
-    
-    # If export_reports is True, add an argument to export reports
-    if export_reports:
-        server_prog_cmd.extend(["--export_reports", export_reports])
+    server_prog_cmd = exe + ["--tcp_server_ipaddr", server_ipaddr, "--tcp_server_port", str(server_port), "--batches", str(batches)]
 
     # If running from WebUI then redirect all communication there
     if webui:
@@ -112,7 +108,7 @@ def spawn_progress_server(server_ipaddr: str, server_port: int, batches: int, ex
 
     return sim_progress_proc
 
-def spawn_simulation_runs(schematic_file: str, provider: str, server_ipaddr: str, server_port: int, sim_configs_num: int, webui: bool) -> subprocess.Popen:
+def spawn_simulation_runs(schematic_file: str, provider: str, server_ipaddr: str, server_port: int, sim_configs_num: int, webui: bool, export_reports: str) -> subprocess.Popen:
     """
     Spawn multiple simulation runs in parallel on localhost and optionally to remote machines using MPI.
 
@@ -155,7 +151,7 @@ def spawn_simulation_runs(schematic_file: str, provider: str, server_ipaddr: str
         else:
             run_mp_path = root_path / "batch" / process_name("run_mp")
         exe = get_executable(run_mp_path)
-        submission_cmd = exe + [schematic_file, str(total_procs), str(batch_size), server_ipaddr, str(server_port)]
+        submission_cmd = exe + [schematic_file, str(total_procs), str(batch_size), server_ipaddr, str(server_port), export_reports]
 
     elif provider == "openmpi":
         logger.debug("Using OpenMPI as backend")
@@ -166,7 +162,7 @@ def spawn_simulation_runs(schematic_file: str, provider: str, server_ipaddr: str
         else:
             run_mpi_path = root_path / "batch" / process_name("run_mpi")
         exe = get_executable(run_mpi_path)
-        submission_cmd = ["mpirun", "--bind-to", "none", "--oversubscribe", "-np", str(total_procs)] + exe + [schematic_file, str(batch_size), server_ipaddr, str(server_port)]
+        submission_cmd = ["mpirun", "--bind-to", "none", "--oversubscribe", "-np", str(total_procs)] + exe + [schematic_file, str(batch_size), server_ipaddr, str(server_port), export_reports]
 
     elif provider == "intelmpi":
         logger.debug("Using IntelMPI as backend")
@@ -180,7 +176,7 @@ def spawn_simulation_runs(schematic_file: str, provider: str, server_ipaddr: str
         exe = get_executable(run_mpi_path)
         # Intel MPI supports oversubscription by default
         # Not defining a bind policy places the threads randomly
-        submission_cmd = ["mpiexec", "-np", str(total_procs)] + exe + [schematic_file, str(batch_size), server_ipaddr, str(server_port)]
+        submission_cmd = ["mpiexec", "-np", str(total_procs)] + exe + [schematic_file, str(batch_size), server_ipaddr, str(server_port), export_reports]
     
     # Handle WebUI
     if webui:
@@ -228,8 +224,9 @@ def execute_simulation(cmdargs=None):
     # This will be broadcasted to the simulation run workers to report to the progress server
     server_ipaddr, server_port = socket.gethostbyname(socket.gethostname()), 54321
 
-    # We first spawn the progress server to listen for connections
-    sim_progress_proc = spawn_progress_server(server_ipaddr, server_port, len(schematic_files), export_reports, webui)
+    # If we aren't using the WebUI, we spawn initially the progress server
+    if not webui:
+        sim_progress_proc = spawn_progress_server(server_ipaddr, server_port, len(schematic_files), webui)
 
     # And then spawn the batches
     sim_run_procs = list()
@@ -241,7 +238,7 @@ def execute_simulation(cmdargs=None):
         logger.debug(f"The total number of simulation configurations is {sim_configs}")
 
         sim_run_procs.append(
-            spawn_simulation_runs(schematic_file.strip(), provider, server_ipaddr, server_port, sim_configs, webui)
+            spawn_simulation_runs(schematic_file.strip(), provider, server_ipaddr, server_port, sim_configs, webui, export_reports)
         )
 
     # We first wait for the batches of simulation configs
@@ -249,9 +246,10 @@ def execute_simulation(cmdargs=None):
         proc.wait()
     logger.debug(f"The simulation runs finished successfully")
 
-    # And then for the progress server
-    sim_progress_proc.wait()
-    logger.debug(f"The progress server closed gracefully")
+    # And then for the progress server if webui=False
+    if not webui:
+        sim_progress_proc.wait()
+        logger.debug(f"The progress server closed gracefully")
     
 
 if __name__ == "__main__":

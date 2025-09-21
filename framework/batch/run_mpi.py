@@ -22,7 +22,8 @@ mpi_rank = mpi_comm.Get_rank()
 # Define the server IP address and port number for all MPI ranks
 server_ipaddr = sys.argv[3]
 server_port = int(sys.argv[4])
-webui = bool(int(sys.argv[5]))
+export_reports = str(sys.argv[5])
+webui = bool(int(sys.argv[6]))
 multiple_simulations_partial = partial(multiple_simulations, server_ipaddr=server_ipaddr, server_port=server_port, webui=webui)
 
 if mpi_rank == 0:
@@ -40,7 +41,7 @@ if mpi_rank == 0:
 
     logger.debug("Notify progress server for new batch of sim configs.")
     prog_sock = TCPSocket(server_ipaddr, server_port).reusable().client()
-    prog_sock.send(msg={"type": "BatchStart", "batch_id": batch_creator.batch_id, "#configs": str(total_procs * batch_size)}, json_fmt=True)
+    prog_sock.send(msg={"type": "BatchStart", "batch_id": batch_creator.batch_id, "#configs": str(total_procs * batch_size), "export_reports": export_reports}, json_fmt=True)
     # TODO: Should check if the project name == batch id is unique
 
     if total_procs > 1:

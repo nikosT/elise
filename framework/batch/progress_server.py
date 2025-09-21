@@ -9,6 +9,7 @@ from rich.table import Table
 import select
 import socket
 import sys
+import threading
 from time import time
 from typing import Optional
 from websocket import create_connection
@@ -18,19 +19,46 @@ sys.path.append(os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..")
 ))
 
-from common.communication import TCPSocket, pad_message
+from common.communication import TCPSocket, pad_message, get_ip
 from common.utils import define_logger
 
 logger = define_logger()
 console = Console()
 
+ws_clients = set()
+UPDATE_TIME = 3
+
+def _handler(wsocket):
+    global ws_clients
+
+    if wsocket not in ws_clients:
+        ws_clients.add(wsocket)
+        logger.debug(f"New WebUI client with websocket: {wsocket}")
+    
+    print([cl.socket for cl in ws_clients])
+
+    # Broadcast message from server to all the clients
+    for msg in wsocket:
+        for ws_client in ws_clients.copy():
+            try:
+                ws_client.send(msg, text=True)
+            except Exception as e:
+                print(e)
+                # Remove client if it is not responding
+                ws_clients.remove(ws_client)
+
+
+
+def websocket_server(ws_server_ipaddr, ws_server_port):
+    with serve(handler=_handler, host=ws_server_ipaddr, port=ws_server_port, ping_timeout=None) as wsocket:
+        wsocket.serve_forever()
+
 
 def progress_server(server_ipaddr: str, 
                     server_port: int,
                     batches: Optional[int],
-                    export_reports="", 
                     webui=False,
-                    ws_server_ip_addr: str = "127.0.0.1",
+                    ws_server_ipaddr: str = "127.0.0.1",
                     ws_server_port: int = 55501):
 
     logger.debug("Starting the Progress Server.")
@@ -79,7 +107,7 @@ def progress_server(server_ipaddr: str,
 
     if webui:
         logger.debug("Progress server established connection to WebUI.")
-        webui_socket = TCPSocket(ws_server_ip_addr, ws_server_port).client()
+        webui_client = create_connection(f"ws://{ws_server_ipaddr}:{ws_server_port}")
     
     while True:
 
@@ -105,9 +133,10 @@ def progress_server(server_ipaddr: str,
                            "Simulated Time", 
                            "Time Ratio (Simulated Days / 1 real hour)"]
                 
-                if export_reports:
-                    os.makedirs(f"{export_reports}/{batch_id}", exist_ok=True)
-                    with open(f"{export_reports}/{batch_id}/time_reports.csv", "w") as f:
+                if batch_info["export_reports"] != "":
+                    export_reports = batch_info["export_reports"]
+                    os.makedirs(export_reports, exist_ok=True)
+                    with open(f"{export_reports}/time_reports.csv", "w") as f:
                         writer = csv.writer(f)
                         writer.writerow(headers)
                         for row in batch_info["timers"]:
@@ -123,6 +152,9 @@ def progress_server(server_ipaddr: str,
                         table.add_row(*ext_row)
                     console.print(table)
                     print()
+                
+                if webui:
+                    webui_client.send(pad_message(json.dumps({"batch_id": batch_id, "progress": 100}).encode()))
 
                 batch_map.pop(batch_id)
 
@@ -130,9 +162,13 @@ def progress_server(server_ipaddr: str,
                 if batches is not None:
                     batches -= 1
             else:
+                # Calculate the overall progress of the batch
                 batch_progress = sum(batch_info["progress"]) / len(batch_info["progress"])
+
                 if webui:
-                    webui_socket.send(msg={"batch_id": batch_id, "progress": batch_progress})
+                    if time() - batch_info["webui_latest_update"] > UPDATE_TIME:
+                        webui_client.send(pad_message(json.dumps({"batch_id": batch_id, "progress": batch_progress}).encode()))
+                        batch_info["webui_latest_update"] = time()
                 else:
                     progress.update(batch_info["task_id"], completed=batch_progress)
                     progress.refresh()
@@ -142,8 +178,6 @@ def progress_server(server_ipaddr: str,
         if batches is not None and batches <= 0:
             progress.stop()
             del server_sock
-            if webui:
-                del webui_socket
             return
 
 
@@ -183,6 +217,7 @@ def progress_server(server_ipaddr: str,
 
                         match msg_type:
                             case "BatchStart":
+                                export_reports = str(msg_dict["export_reports"])
                                 configs_num = int(msg_dict["#configs"])
                                 # Create progress task
                                 task_id = progress.add_task(description=batch_id, total=100)
@@ -192,7 +227,9 @@ def progress_server(server_ipaddr: str,
                                         "#rem_configs": configs_num,
                                         "progress": [0] * configs_num,
                                         "timers": [[]] * configs_num,
-                                        "task_id": task_id
+                                        "task_id": task_id,
+                                        "webui_latest_update": time() if webui else -1,
+                                        "export_reports": export_reports
                                     }
                                 })
 
@@ -229,25 +266,34 @@ def progress_server(server_ipaddr: str,
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(prog="progress_server", description="A server process to monitor the progress of each simulation")
-    parser.add_argument("--server_ipaddr", type=str, required=True)
-    parser.add_argument("--tcp_server_port", type=int, default=54321)
-    parser.add_argument("--batches", default=None)
-    parser.add_argument("--export_reports", default="", type=str, help="Provde a directory to export reports for each scheduler")
+    parser.add_argument("--tcp_server_ipaddr", type=str, default="0.0.0.0", help="The ip address for the progress server")
+    parser.add_argument("--tcp_server_port", type=int, default=54321, help="The port for the progress server")
+    parser.add_argument("--batches", default=None, help="The number of batches before shutting down the progress server")
     parser.add_argument("--webui", default=False, action="store_true")
     parser.add_argument("--ws_server_ipaddr", type=str, default="127.0.0.1", help="The ip address of the websocket server")
     parser.add_argument("--ws_server_port", type=int, default=55501, help="The port number of the websocket server")
 
     args = parser.parse_args()
 
-    host_ipaddr = args.server_ipaddr
-    tcp_port = args.tcp_server_port
+    tcp_server_ipaddr = args.tcp_server_ipaddr
+    tcp_server_port = args.tcp_server_port
     batches = args.batches
-    export_reports = args.export_reports
     webui = args.webui
     ws_server_ipaddr = args.ws_server_ipaddr
     ws_server_port = args.ws_server_port
 
     if batches is not None:
         batches = int(batches)
+    
+    if webui:
+        th1 = threading.Thread(target=websocket_server, args=(ws_server_ipaddr, ws_server_port))
+        th2 = threading.Thread(target=progress_server, args=(tcp_server_ipaddr, tcp_server_port, batches, webui, ws_server_ipaddr, ws_server_port))
 
-    progress_server("0.0.0.0", tcp_port, batches, export_reports, webui, ws_server_ipaddr, ws_server_port)
+        th1.start()
+        th2.start()
+
+        th1.join()
+        th2.join()
+    
+    else:
+        progress_server(tcp_server_ipaddr, tcp_server_port, batches, webui, ws_server_ipaddr, ws_server_port)

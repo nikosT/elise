@@ -25,14 +25,15 @@ if __name__ == "__main__":
     batch_size = int(sys.argv[3])
     server_ipaddr = sys.argv[4]
     server_port = int(sys.argv[5])
-    webui = bool(int(sys.argv[6]))
+    export_reports = str(sys.argv[6])
+    webui = bool(int(sys.argv[7]))
 
     batch_creator = BatchCreator(schematic_file_path, webui)
     batch_creator.create_ranks()
 
     logger.debug("Notify progress server for new batch of sim configs.")
     prog_sock = TCPSocket(server_ipaddr, server_port).reusable().client()
-    prog_sock.send(msg={"type": "BatchStart", "batch_id": batch_creator.batch_id, "#configs": str(total_procs * batch_size)}, json_fmt=True)
+    prog_sock.send(msg={"type": "BatchStart", "batch_id": batch_creator.batch_id, "#configs": str(total_procs * batch_size), "export_reports": export_reports}, json_fmt=True)
     # TODO: Should check if the project name == batch id is unique
 
     logger.debug(f"Creating a process pool of {total_procs} max workers")

@@ -92,11 +92,13 @@ def main(ip_addr="0.0.0.0", launch_ws_server=True):
     if launch_ws_server:
         root_dir = Path(ELiSE_ROOT)
         if cutils.is_bundled():
-            ws_path = root_dir.parent / cutils.process_name("ws_server")
+            # ws_path = root_dir.parent / cutils.process_name("ws_server")
+            ws_path = root_dir.parent / cutils.process_name("progress_server")
         else:
-            ws_path = root_dir / "webui" / cutils.process_name("ws_server")
+            # ws_path = root_dir / "webui" / cutils.process_name("ws_server")
+            ws_path = root_dir / "batch" / cutils.process_name("progress_server")
         
-        ws_cmd = cutils.get_executable(ws_path)
+        ws_cmd = cutils.get_executable(ws_path) + ["--webui"]
         ws_server_proc = subprocess.Popen(ws_cmd, env=os.environ.copy())
 
     # Start application
