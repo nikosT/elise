@@ -139,8 +139,8 @@ def progress_server(server_ipaddr: str,
                     with open(f"{export_reports}/time_reports.csv", "w") as f:
                         writer = csv.writer(f)
                         writer.writerow(headers)
-                        for row in batch_info["timers"]:
-                            writer.writerow(row)
+                        for i, row in enumerate(batch_info["timers"]):
+                            writer.writerow([i] + row)
                 else:
 
                     # Print results table and remove batch from the batch_map
