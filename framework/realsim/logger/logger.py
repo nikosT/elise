@@ -251,7 +251,7 @@ class Logger(object):
         header += "Number of Allocated Processors,Average CPU Time Used,Used Memory," # Used resources
         header += "Requested Number of Processors,Requested Time,Requested Memory," # Requested resources
         header += "Status,User ID,Group ID,Executable Number," # Assign job_name
-        header += "Queue Number,Partition Number,Preceding Job Number,Think Time from Preceding Job\n" # Irrelevant for us
+        header += "Queue Number,Partition Number,Preceding Job Number,Think Time from Preceding Job,Assigned Processors\n" # Irrelevant for us
 
         workload = ""
         for jevt_id, jevt in self.job_events.items():
@@ -261,7 +261,8 @@ class Logger(object):
             workload += f"{len(jevt['assigned procs'])},,,"
             workload += f"{jevt['num of processes']},{jevt['wall time']},,"
             workload += f"1,,,{job_name},"
-            workload += f",,,\n"
+            workload += f",,,,"
+            workload += f"\"{list(jevt['assigned procs'])}\"\n"
 
         return header + workload
 
