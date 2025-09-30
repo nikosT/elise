@@ -25,9 +25,12 @@ class ShuffleKeysListGenerator(AbstractCustomLogsGenerator[str]):
         - arg: a list of names of loads and their submission time
         """
 
+        with open(arg, 'r') as _f:
+            gen_data = _f.read()
+
         # Create a list of jobs based on arg
         jobs_set = list()
-        text_split = arg.split('\n')
+        text_split = gen_data.split('\n')
 
         for line in text_split[1:]:
             fields = line.split(',')

@@ -1,0 +1,9 @@
+# Python cache directories
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Specific directories you want to ignore
+api/loader/__pycache__/
+framework/**/__pycache__/

@@ -267,6 +267,7 @@ class BatchCreator:
             # Read from raw data
             try:
                 lm = self.__input_read_from_source(input)
+                self.lm = lm
             except Exception as e:
                 logger.exception(e)
 
@@ -469,7 +470,7 @@ class BatchCreator:
             for [sched_index, sched_cls, sched_opts] in self.__schedulers:
                 
                 # Create a database instance
-                database = Database(deepcopy_list(input), heatmap)
+                database = Database(deepcopy_list(input), heatmap, lm=self.lm)
                 database.setup()
 
                 # Create a cluster instance
