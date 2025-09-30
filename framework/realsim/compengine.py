@@ -81,7 +81,14 @@ class ComputeEngine:
             except:
                 # Set everything to compact speedup if no list is given
                 speedups = [1]
-            max_speedup = min_speedup = speedups[0]
+
+            min_speedup = speedups[0]
+            max_speedup = self.db.lm.loads[job.job_name].get_med_speedup(co_load=None)
+
+            # if no spread found failback to min speedup
+            if not max_speedup:
+                max_speedup = min_speedup
+
             accumulator = length = 0
             for speedup in speedups:
                 if speedup > max_speedup:
