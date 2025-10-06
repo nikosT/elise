@@ -19,7 +19,7 @@ sys.path.append(os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..")
 ))
 
-from common.communication import TCPSocket, pad_message, get_ip
+from common.communication import TCPSocket, pad_message
 from common.utils import define_logger
 
 logger = define_logger()

@@ -32,7 +32,6 @@ progress_bar = dbc.Alert([
     ],
     id="progress-bar-collapse",
     is_open=False, 
-    # style={"position": "fixed", "bottom": "0", "left": "0", "right": "0", "margin": "0", "width": "100%"}
 )
 
 
@@ -65,6 +64,8 @@ def update_progress_store(msg):
 @callback(
     Output("progress-bar-collapse", "is_open"),
     Output("progress-bar-collapse", "duration"),
+    Output("progress-bar", "value", allow_duplicate=True),
+    Output("progress-bar", "label", allow_duplicate=True),
     Input("execute-simulation-btn", "n_clicks"),
     prevent_initial_call=True
 )
@@ -79,9 +80,9 @@ def webui_show_progress(n_clicks):
     Returns
     -------
     True, Any
-        Opens the progress bar for an infinite amount of time
+        Opens the progress bar at 0% value for an infinite amount of time
     """
-    return True, None
+    return True, None, 0, "0"
 
 
 @callback(
@@ -122,7 +123,8 @@ def webui_execute_simulation(n_clicks, schematic_data, session_data, results_dat
     Returns
     -------
     tuple[dict, bool, int]
-        Returns the new results, opens the Alert component notifying that the simulation has ended and hides the progress bar after an integer amount of milliseconds
+        Returns the new results, opens the Alert component notifying that the simulation has ended, and hides the progress 
+        bar after an integer amount of milliseconds
     """
 
     if not n_clicks:

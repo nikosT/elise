@@ -17,11 +17,11 @@ ELiSE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__)))
 def run_gui():
     root_dir = Path(ELiSE_ROOT)
     if is_bundled():
-        ws_path = root_dir.parent / process_name("ws_server")
+        ws_path = root_dir.parent / process_name("progress_server")
     else:
-        ws_path = root_dir / "webui" / process_name("ws_server")
+        ws_path = root_dir / "batch" / process_name("progress_server")
     
-    ws_cmd = get_executable(ws_path)
+    ws_cmd = get_executable(ws_path) + ["--webui"]
     ws_proc = subprocess.Popen(ws_cmd, env=os.environ.copy())
     
     # Start webui in a thread
@@ -31,7 +31,7 @@ def run_gui():
     
     webview.create_window("ELiSE", "http://127.0.0.1:8050")
     webview.start()
-    
+
     ws_proc.terminate()
     ws_proc.wait()
 
@@ -40,6 +40,10 @@ def run_webui():
 
 def run_cmdline(cmdargs):
     execute_simulation(cmdargs)
+
+def run_service():
+    #TODO: use the progress server as the base to build the service
+    pass
 
 def main():
     parser = argparse.ArgumentParser(prog="elise", description="The entry point of ELiSE framework")
