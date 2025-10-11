@@ -1,5 +1,6 @@
 import argparse
-from math import ceil
+from base64 import b64encode
+from math import ceil, gcd
 from multiprocessing import cpu_count
 import os
 from pathlib import Path
@@ -10,7 +11,7 @@ import sys
 ELiSE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(ELiSE_ROOT)
 
-from batch.batch_utils import BatchCreator
+from batch.batch_utils import SchematicAnalysis
 from common.utils import define_logger, is_bundled, process_name, get_executable
 
 logger = define_logger()
@@ -45,26 +46,25 @@ def local_or_hpc_env() -> int:
 
     return total_cores
 
-def calculate_for_less_avail_cores(sim_configs_num: int, avail_cores: int) -> tuple[int, int]:
+def calculate_for_less_avail_cores(total_procs: int, sim_configs: int) -> list[int]:
+    """Calculate the number of simulation configurations that each process will handle.
+
+    Parameters
+    ----------
+    total_procs     :   int
+                        The total number of processes that will be launched for computation.
+
+    sim_configs     :   int 
+                        The total number of simulation configurations.
+
+    Returns
+    -------
+    list[int]
+        The list of simulation configurations for each process.
     """
-    Calculate the number of processes and batch size needed to process a given number of simulation configurations
-    with less available cores.
-
-    Args:
-        sim_configs_num (int): The total number of simulation configurations.
-        avail_cores (int): The total number of available cores for computation.
-
-    Returns:
-        tuple: A tuple containing two values. The first value is the total number of processes needed, and the second
-               value is the batch size used to calculate this number.
-    """
-    batch_size = ceil(sim_configs_num / avail_cores)
-    total_procs = 0
-    while sim_configs_num > 0:
-        sim_configs_num -= batch_size
-        total_procs += 1
-
-    return total_procs, batch_size
+    base = sim_configs // total_procs
+    rem = sim_configs % total_procs
+    return [base + 1 if i < rem else base for i in range(total_procs)]
 
 def spawn_progress_server(server_ipaddr: str, server_port: int, batches: int, webui: bool) -> subprocess.Popen:
     """
@@ -129,16 +129,23 @@ def spawn_simulation_runs(schematic_file: str, provider: str, server_ipaddr: str
     # Calculate the number of available cores under the context
     avail_cores = local_or_hpc_env()
 
-    # Calculate the number of processes and batch size based on available cores and simulation configurations
+    # Calculate the number of processes and batch range for each process based on available cores and number of simulation configurations
     if avail_cores >= sim_configs_num:
         total_procs = sim_configs_num
-        batch_size = 1
+        batch_ranges = [1] * total_procs
     else:
-        total_procs, batch_size = calculate_for_less_avail_cores(sim_configs_num, avail_cores)
+        total_procs = avail_cores
+        batch_ranges = calculate_for_less_avail_cores(total_procs, sim_configs_num)
 
     total_procs_str = f"One process" if total_procs == 1 else f"{total_procs} parallel processes"
-    batch_str = f"a single simulation configuration" if batch_size == 1 else f"{batch_size} simulation configurations"
+    batch_str = f"a single simulation configuration" if sum(batch_ranges) == 1 else f"{sum(batch_ranges)} simulation configurations"
     logger.debug(f"{total_procs_str} for {batch_str}")
+
+    # Encode the batch ranges
+    branges_enc = b64encode(" ".join(map(lambda x: str(x), batch_ranges)).encode())
+    branges_str = branges_enc.decode()
+
+    logger.debug(f"Encoded the batch ranges: {branges_str} .")
 
     # Build the submission script depending on the provider
     submission_cmd = list()
@@ -151,7 +158,7 @@ def spawn_simulation_runs(schematic_file: str, provider: str, server_ipaddr: str
         else:
             run_mp_path = root_path / "batch" / process_name("run_mp")
         exe = get_executable(run_mp_path)
-        submission_cmd = exe + [schematic_file, str(total_procs), str(batch_size), server_ipaddr, str(server_port), export_reports]
+        submission_cmd = exe + [schematic_file, str(total_procs), branges_str, server_ipaddr, str(server_port), export_reports]
 
     elif provider == "openmpi":
         logger.debug("Using OpenMPI as backend")
@@ -162,7 +169,7 @@ def spawn_simulation_runs(schematic_file: str, provider: str, server_ipaddr: str
         else:
             run_mpi_path = root_path / "batch" / process_name("run_mpi")
         exe = get_executable(run_mpi_path)
-        submission_cmd = ["mpirun", "--bind-to", "none", "--oversubscribe", "-np", str(total_procs)] + exe + [schematic_file, str(batch_size), server_ipaddr, str(server_port), export_reports]
+        submission_cmd = ["mpirun", "--bind-to", "none", "--oversubscribe", "-np", str(total_procs)] + exe + [schematic_file, branges_str, server_ipaddr, str(server_port), export_reports]
 
     elif provider == "intelmpi":
         logger.debug("Using IntelMPI as backend")
@@ -176,7 +183,7 @@ def spawn_simulation_runs(schematic_file: str, provider: str, server_ipaddr: str
         exe = get_executable(run_mpi_path)
         # Intel MPI supports oversubscription by default
         # Not defining a bind policy places the threads randomly
-        submission_cmd = ["mpiexec", "-np", str(total_procs)] + exe + [schematic_file, str(batch_size), server_ipaddr, str(server_port), export_reports]
+        submission_cmd = ["mpiexec", "-np", str(total_procs)] + exe + [schematic_file, branges_str, server_ipaddr, str(server_port), export_reports]
     
     # Handle WebUI
     if webui:
@@ -232,9 +239,9 @@ def execute_simulation(cmdargs=None):
     sim_run_procs = list()
     for schematic_file in schematic_files:
         # Calculate the number of needed cores to run all the simulations in parallel
-        batch_creator = BatchCreator(schematic_file.strip())
+        schematic_analysis = SchematicAnalysis(schematic_file.strip())
 
-        sim_configs = batch_creator.get_sim_configs_num()
+        sim_configs = schematic_analysis.get_sim_configs_num()
         logger.debug(f"The total number of simulation configurations is {sim_configs}")
 
         sim_run_procs.append(

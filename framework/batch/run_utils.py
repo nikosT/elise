@@ -11,6 +11,8 @@ sys.path.append(os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..")
 ))
 
+from batch.batch_utils import SimConfigCreator
+
 if TYPE_CHECKING:
     from realsim.database import Database
     from realsim.compengine import ComputeEngine
@@ -241,6 +243,8 @@ def single_simulation(sim_batch, server_ipaddr, server_port, webui=False):
     # Create a TCP socket to communicate with the progress server
     sock = TCPSocket(server_ipaddr, server_port).client().nonblocking()
 
+    sim_config_creator = SimConfigCreator(sim_batch)
+
     batch_id: str
     sim_idx: int
     inp_idx: int
@@ -252,7 +256,7 @@ def single_simulation(sim_batch, server_ipaddr, server_port, webui=False):
     compengine: ComputeEngine
     actions: list
     extra_features: list
-    batch_id, sim_idx, inp_idx, sched_idx, database, cluster, scheduler, evt_logger, compengine, actions, extra_features = sim_batch
+    batch_id, sim_idx, inp_idx, sched_idx, database, cluster, scheduler, evt_logger, compengine, actions, extra_features = sim_config_creator.simconfig
 
     comp_logger = logger.getChild("compengine")
     if envvar_bool_val("ELiSE_DEBUG"):
