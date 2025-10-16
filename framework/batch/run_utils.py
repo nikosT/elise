@@ -236,12 +236,9 @@ def patch(evt_logger, extra_features):
         evt_logger.get_animated_cluster = MethodType(__get_animated_cluster, evt_logger)
 
 
-def single_simulation(sim_batch, server_ipaddr, server_port, webui=False):
+def single_simulation(sim_batch, sock, webui=False):
     """The function that defines the simulation loop and actions
     """
-
-    # Create a TCP socket to communicate with the progress server
-    sock = TCPSocket(server_ipaddr, server_port).client().nonblocking()
 
     sim_config_creator = SimConfigCreator(sim_batch)
 
@@ -256,7 +253,19 @@ def single_simulation(sim_batch, server_ipaddr, server_port, webui=False):
     compengine: ComputeEngine
     actions: list
     extra_features: list
+
     batch_id, sim_idx, inp_idx, sched_idx, database, cluster, scheduler, evt_logger, compengine, actions, extra_features = sim_config_creator.simconfig
+    sock.send(
+        msg={
+            "type": "ProgressStart",
+            "batch_id": batch_id,
+            "sim_id": sim_idx
+        },
+        json_fmt=True,
+        close_on_sent=False,
+        reconnect_on_failure=True
+    )
+    sock.ref.recv(1) # wait until progress server acknowledges the connection
 
     comp_logger = logger.getChild("compengine")
     if envvar_bool_val("ELiSE_DEBUG"):
@@ -307,7 +316,8 @@ def single_simulation(sim_batch, server_ipaddr, server_port, webui=False):
             "sim_time": sim_time
         },
         json_fmt=True,
-        close_on_sent=True
+        close_on_sent=False,
+        reconnect_on_failure=True
     )
 
     # If there are actions provided for this rank
@@ -325,7 +335,10 @@ def single_simulation(sim_batch, server_ipaddr, server_port, webui=False):
     
 
 def multiple_simulations(sim_batches, server_ipaddr, server_port, webui=False):
+    # If the process is the handling process then get the socket
+    sock = TCPSocket(server_ipaddr, server_port).client()
+
     for sim_batch in sim_batches:
-        logger.debug(f"Starting single simulation with id {sim_batch[0]}")
-        single_simulation(sim_batch, server_ipaddr, server_port, webui)
-        logger.debug(f"Finished single simulation with id {sim_batch[0]}")
+        logger.debug(f"Starting single simulation with id {sim_batch[1]}")
+        single_simulation(sim_batch, sock, webui)
+        logger.debug(f"Finished single simulation with id {sim_batch[1]}")

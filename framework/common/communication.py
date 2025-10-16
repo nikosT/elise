@@ -53,9 +53,9 @@ class TCPSocket(Socket):
     
     def __del__(self):
         try:
-            self.__socket.shutdown()
-        except:
-            pass
+            self.__socket.close()
+        except Exception as e:
+            print(e)
 
     @property
     def ref(self):

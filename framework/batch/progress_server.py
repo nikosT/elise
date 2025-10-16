@@ -232,6 +232,11 @@ def progress_server(server_ipaddr: str,
                                         "export_reports": export_reports
                                     }
                                 })
+                            
+                            case "ProgressStart":
+                                sim_idx = int(msg_dict["sim_id"])
+                                logger.debug(f"Progress Start for batch: {batch_id} and sim: {sim_idx}.")
+                                notified_socket.send(b'\0') # acknowledge connection
 
                             case "Progress":
                                 sim_idx = int(msg_dict["sim_id"])
@@ -257,6 +262,7 @@ def progress_server(server_ipaddr: str,
                                 ]
 
                                 batch_map[batch_id]["#rem_configs"] -= 1
+                                logger.debug(f"Remaining simulation configs: {batch_map[batch_id]['#rem_configs']} .")
 
                     except Exception as e:
                         logger.debug(f"Message received: {msg.decode()}")

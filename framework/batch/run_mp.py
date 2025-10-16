@@ -1,7 +1,7 @@
 from base64 import b64decode
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
-from multiprocessing import freeze_support
+from multiprocessing import freeze_support, get_context
 import os
 import sys
 
@@ -37,11 +37,11 @@ if __name__ == "__main__":
     batch = schematic_analysis.batch
 
     logger.debug("Notify progress server for new batch of sim configs.")
-    prog_sock = TCPSocket(server_ipaddr, server_port).reusable().client()
+    prog_sock = TCPSocket(server_ipaddr, server_port).client()
     prog_sock.send(msg={"type": "BatchStart", "batch_id": schematic_analysis.batch_id, "#configs": sum(batch_ranges), "export_reports": export_reports}, json_fmt=True)
 
     logger.debug(f"Creating a process pool of {total_procs} max workers")
-    executor = ProcessPoolExecutor(max_workers=total_procs)
+    executor = ProcessPoolExecutor(max_workers=total_procs, mp_context=get_context("spawn"))
 
     multiple_simulations_partial = partial(multiple_simulations, server_ipaddr=server_ipaddr, server_port=server_port, webui=webui)
 
