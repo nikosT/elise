@@ -3,63 +3,183 @@ import csv
 from datetime import timedelta
 import json
 import os
+from rich.console import Console
+from rich.progress import Progress
+from rich.table import Table
 import select
 import socket
 import sys
-import tabulate
+import threading
+from time import time
+from typing import Optional
+from websocket import create_connection
+from websockets.sync.server import serve
 
 sys.path.append(os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..")
 ))
 
+from common.communication import TCPSocket, pad_message
 from common.utils import define_logger
-from common.communication import pad_message
 
 logger = define_logger()
+console = Console()
 
-def progress_server(server_ipaddr="127.0.0.1", server_port=54321, connections=5, export_reports="", webui=False):
+ws_clients = set()
+UPDATE_TIME = 3
 
-    # Create a socket and set options for resusable ip address
-    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+def _handler(wsocket):
+    global ws_clients
 
-    # Bind socket to the given ip address and port
-    server_sock.bind((server_ipaddr, server_port))
+    if wsocket not in ws_clients:
+        ws_clients.add(wsocket)
+        logger.debug(f"New WebUI client with websocket: {wsocket}")
+    
+    print([cl.socket for cl in ws_clients])
 
-    # Listen to incoming connections
-    server_sock.listen(connections)
+    # Broadcast message from server to all the clients
+    for msg in wsocket:
+        for ws_client in ws_clients.copy():
+            try:
+                ws_client.send(msg, text=True)
+            except Exception as e:
+                print(e)
+                # Remove client if it is not responding
+                ws_clients.remove(ws_client)
+
+
+
+def websocket_server(ws_server_ipaddr, ws_server_port):
+    with serve(handler=_handler, host=ws_server_ipaddr, port=ws_server_port, ping_timeout=None) as wsocket:
+        wsocket.serve_forever()
+
+
+def progress_server(server_ipaddr: str, 
+                    server_port: int,
+                    batches: Optional[int],
+                    webui=False,
+                    ws_server_ipaddr: str = "127.0.0.1",
+                    ws_server_port: int = 55501):
+
+    logger.debug("Starting the Progress Server.")
+
+    # Create a reusable, listening socket for the progress server
+    server_sock = TCPSocket(server_ipaddr, server_port).reusable().server()
+
+    """
+        batchId1
+            handler = socket
+            #rem_configs = N_1
+            progress = list()
+            timers = list()
+            task_id = ..
+        
+        batchId2
+            handler = socket
+            #rem_configs = N_2
+            progress = list()
+            timers = list()
+            task_id = ..
+        ..
+
+        batchIdM
+            handler = socket
+            #rem_configs = N_M
+            progress = list()
+            timers = list()
+            task_id = ..
+        
+    --------------------------------------
+    handler: the socket that handles the communication with the progress server, to inform the start of a batch and the termination of one
+    #rem_configs: the number of remaining simulation configurations for a specific batch that is still running
+    progress: list of the current progress of the simulation configurations
+    timers: list of simulation id, input id, scheduler id, scheduler name, real timespan, simulated timespan, real v simulated timespan ratio
+            
+    """
+    batch_map = dict()
+
+    # Create progress instance
+    progress = Progress(auto_refresh=False, console=console)
+    progress.start()
 
     # List of current available open sockets
-    current_sockets = [server_sock]
+    current_sockets = [server_sock.ref]
 
-    # Remaining connections
-    rem_connections = connections
-
-    # Progress for all connections
-    progress_list = [0] * connections
-    
-    # Time reports list of tuples(id, scheduler name, real time, simulated time, time ratio)
-    time_reports_list: list[tuple[int, str, str, str, str]] = list()
-    
     if webui:
-        print("Establishing connection to WebUI")
-        webui_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        webui_socket.connect(("127.0.0.1", 55501))
+        logger.debug("Progress server established connection to WebUI.")
+        webui_client = create_connection(f"ws://{ws_server_ipaddr}:{ws_server_port}")
     
     while True:
 
-        overall_progress = sum(progress_list) / connections
-        
-        if webui:
-            webui_socket.send(pad_message(str(overall_progress).encode("utf-8")))
-        else:
-            # Stdout print of overall progress
-            print(f"\rOverall Progress: {overall_progress:.2f}%", end="")
+        for batch_id, batch_info in batch_map.copy().items():
 
-        # If the remaining connections is zero and the only socket left is the
-        # server then shutdown the progress server
-        if rem_connections <= 0 and len(current_sockets) == 1 and current_sockets[0] == server_sock:
-            break
+            # A simulation batch has finished
+            if batch_info["#rem_configs"] == 0:
+                # Remove the progress bar
+                progress.remove_task(batch_info["task_id"])
+
+                handler_sock: socket.socket = batch_info["handler"]
+                # Remove handler socket from current open sockets
+                current_sockets.remove(handler_sock)
+                # Notify the handler that the connection will terminate
+                handler_sock.close()
+
+                # Header for reports
+                headers = ["Simulation ID", 
+                           "Input ID",
+                           "Scheduler ID",
+                           "Scheduler Name", 
+                           "Real Time", 
+                           "Simulated Time", 
+                           "Time Ratio (Simulated Days / 1 real hour)"]
+                
+                if batch_info["export_reports"] != "":
+                    export_reports = batch_info["export_reports"]
+                    os.makedirs(export_reports, exist_ok=True)
+                    with open(f"{export_reports}/time_reports.csv", "w") as f:
+                        writer = csv.writer(f)
+                        writer.writerow(headers)
+                        for i, row in enumerate(batch_info["timers"]):
+                            writer.writerow([i] + row)
+                else:
+
+                    # Print results table and remove batch from the batch_map
+                    table = Table(title=f"Batch {batch_id}", title_justify="left", title_style="bold")
+                    for col in headers:
+                        table.add_column(col)
+                    for sim_id, row in enumerate(batch_info["timers"]):
+                        ext_row = [str(sim_id)] + list(row)
+                        table.add_row(*ext_row)
+                    console.print(table)
+                    print()
+                
+                if webui:
+                    webui_client.send(pad_message(json.dumps({"batch_id": batch_id, "progress": 100}).encode()))
+
+                batch_map.pop(batch_id)
+
+                # If there is a certain number of batches passed then decrease
+                if batches is not None:
+                    batches -= 1
+            else:
+                # Calculate the overall progress of the batch
+                batch_progress = sum(batch_info["progress"]) / len(batch_info["progress"])
+
+                if webui:
+                    if time() - batch_info["webui_latest_update"] > UPDATE_TIME:
+                        webui_client.send(pad_message(json.dumps({"batch_id": batch_id, "progress": batch_progress}).encode()))
+                        batch_info["webui_latest_update"] = time()
+                else:
+                    progress.update(batch_info["task_id"], completed=batch_progress)
+                    progress.refresh()
+            
+
+        # If this is a batch submission and all the batches have finished then exit
+        if batches is not None and batches <= 0:
+            progress.stop()
+            del server_sock
+            return
+
 
         # Select/poll from current_sockets
         read_sockets, _, _ = select.select(current_sockets, [], [])
@@ -67,10 +187,9 @@ def progress_server(server_ipaddr="127.0.0.1", server_port=54321, connections=5,
         for notified_socket in read_sockets:
 
             # If a new connection arrives
-            if notified_socket == server_sock:
+            if notified_socket == server_sock.ref:
 
-                client_sock, client_ipaddr = server_sock.accept()
-                # print(f"New connection coming from {client_ipaddr}")
+                client_sock, client_ipaddr = server_sock.ref.accept()
                 current_sockets.append(client_sock)
 
             # A message arrived from a client socket
@@ -80,11 +199,8 @@ def progress_server(server_ipaddr="127.0.0.1", server_port=54321, connections=5,
 
                 # The client has finished execution and exited
                 if not msg:
-                    # print(f"Closed connection from {notified_socket.getpeername()}")
                     current_sockets.remove(notified_socket)
                     notified_socket.close()
-                    # Decrease the amount of remaining socket connections to be fullfilled
-                    rem_connections -= 1
 
                 # If the client has given new information about their progress
                 else:
@@ -95,83 +211,95 @@ def progress_server(server_ipaddr="127.0.0.1", server_port=54321, connections=5,
                         end_pos = msg_dec.find("}")
                         msg_dec = msg_dec[start_pos:end_pos+1]
                         msg_dict = json.loads(msg_dec)
-                        
-                        sim_idx = int(msg_dict["sim_id"])
 
-                        # Check whether it is a progress report or a time report
-                        if "progress_perc" in msg_dict:
+                        msg_type = str(msg_dict["type"])
+                        batch_id = str(msg_dict["batch_id"])
 
-                            progress_perc = int(msg_dict["progress_perc"])
-                            # Update the progress report for the specific simulation run
-                            if progress_perc > progress_list[sim_idx]:
-                                progress_list[sim_idx] = progress_perc
+                        match msg_type:
+                            case "BatchStart":
+                                export_reports = str(msg_dict["export_reports"])
+                                configs_num = int(msg_dict["#configs"])
+                                # Create progress task
+                                task_id = progress.add_task(description=batch_id, total=100)
+                                batch_map.update({
+                                    batch_id: {
+                                        "handler": notified_socket,
+                                        "#rem_configs": configs_num,
+                                        "progress": [0] * configs_num,
+                                        "timers": [[]] * configs_num,
+                                        "task_id": task_id,
+                                        "webui_latest_update": time() if webui else -1,
+                                        "export_reports": export_reports
+                                    }
+                                })
+                            
+                            case "ProgressStart":
+                                sim_idx = int(msg_dict["sim_id"])
+                                logger.debug(f"Progress Start for batch: {batch_id} and sim: {sim_idx}.")
+                                notified_socket.send(b'\0') # acknowledge connection
 
-                        elif "real_time" in msg_dict:
-                            inp_idx = int(msg_dict["inp_id"])
-                            sched_idx = int(msg_dict["sched_id"])
-                            scheduler_name = msg_dict["scheduler"]
-                            real_time = float(msg_dict["real_time"])
-                            sim_time = float(msg_dict["sim_time"])
-                            time_ratio = sim_time / (24 * real_time)
+                            case "Progress":
+                                sim_idx = int(msg_dict["sim_id"])
+                                progress_perc = int(msg_dict["progress_perc"])
+                                if progress_perc > batch_map[batch_id]["progress"][sim_idx]:
+                                    batch_map[batch_id]["progress"][sim_idx] = progress_perc
 
-                            time_reports_list.append((
-                                sim_idx,
-                                inp_idx,
-                                sched_idx,
-                                scheduler_name,
-                                str(timedelta(seconds=real_time)).replace(", ", "_"),
-                                str(timedelta(seconds=sim_time)).replace(", ", "_"),
-                                str(time_ratio)
-                            ))
+                            case "ProgressEnd":
+                                sim_idx = int(msg_dict["sim_id"])
+                                inp_idx = int(msg_dict["inp_id"])
+                                sched_idx = int(msg_dict["sched_id"])
+                                scheduler_name = msg_dict["scheduler"]
+                                real_time = float(msg_dict["real_time"])
+                                sim_time = float(msg_dict["sim_time"])
+                                time_ratio = sim_time / (24 * real_time)
 
-                    except:
-                        print(msg.decode())
-                        pass
-    
-    # Sort time reports based on the simulation run ID
-    time_reports_list.sort(key=lambda elem: elem[0])
+                                batch_map[batch_id]["timers"][sim_idx] = [
+                                    str(inp_idx), str(sched_idx), str(scheduler_name),
+                                    str(timedelta(seconds=real_time)).replace(", ", "_"),
+                                    str(timedelta(seconds=sim_time)).replace(", ", "_"),
+                                    str(time_ratio)
 
-    # Before closing the server print the time reports of all the simulation runs
-    headers = ["Simulation ID", 
-               "Input ID",
-               "Scheduler ID",
-               "Scheduler Name", 
-               "Real Time", 
-               "Simulated Time", 
-               "Time Ratio (Simulated Days / 1 real hour)"]
-    if export_reports:
-        os.makedirs(export_reports, exist_ok=True)
-        with open(f"{export_reports}/time_reports.csv", "w") as f:
-            writer = csv.writer(f)
-            writer.writerow(headers)
-            for row in time_reports_list:
-                writer.writerow(row)
-    else:
-        print()
-        print(tabulate.tabulate(time_reports_list, headers=headers, tablefmt="fancy_grid"))
-    
-    # Close websocket client
-    if webui:
-        webui_socket.close()
+                                ]
 
-    # Close the server socket
-    server_sock.close()
+                                batch_map[batch_id]["#rem_configs"] -= 1
+                                logger.debug(f"Remaining simulation configs: {batch_map[batch_id]['#rem_configs']} .")
+
+                    except Exception as e:
+                        logger.debug(f"Message received: {msg.decode()}")
+                        logger.exception(str(e))
+
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(prog="progress_server", description="A server process to monitor the progress of each simulation")
-    parser.add_argument("--server_ipaddr", type=str, required=True)
-    parser.add_argument("--server_port", type=int, default=54321)
-    parser.add_argument("--connections", type=int, required=True)
-    parser.add_argument("--export_reports", default="", type=str, help="Provde a directory to export reports for each scheduler")
+    parser.add_argument("--tcp_server_ipaddr", type=str, default="0.0.0.0", help="The ip address for the progress server")
+    parser.add_argument("--tcp_server_port", type=int, default=54321, help="The port for the progress server")
+    parser.add_argument("--batches", default=None, help="The number of batches before shutting down the progress server")
     parser.add_argument("--webui", default=False, action="store_true")
+    parser.add_argument("--ws_server_ipaddr", type=str, default="127.0.0.1", help="The ip address of the websocket server")
+    parser.add_argument("--ws_server_port", type=int, default=55501, help="The port number of the websocket server")
 
     args = parser.parse_args()
 
-    host_ipaddr = args.server_ipaddr
-    port = args.server_port
-    connections = args.connections
-    export_reports = args.export_reports
+    tcp_server_ipaddr = args.tcp_server_ipaddr
+    tcp_server_port = args.tcp_server_port
+    batches = args.batches
     webui = args.webui
+    ws_server_ipaddr = args.ws_server_ipaddr
+    ws_server_port = args.ws_server_port
+
+    if batches is not None:
+        batches = int(batches)
     
-    progress_server(host_ipaddr, port, connections, export_reports, webui)
+    if webui:
+        th1 = threading.Thread(target=websocket_server, args=(ws_server_ipaddr, ws_server_port))
+        th2 = threading.Thread(target=progress_server, args=(tcp_server_ipaddr, tcp_server_port, batches, webui, ws_server_ipaddr, ws_server_port))
+
+        th1.start()
+        th2.start()
+
+        th1.join()
+        th2.join()
+    
+    else:
+        progress_server(tcp_server_ipaddr, tcp_server_port, batches, webui, ws_server_ipaddr, ws_server_port)

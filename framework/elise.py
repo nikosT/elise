@@ -17,11 +17,11 @@ ELiSE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__)))
 def run_gui():
     root_dir = Path(ELiSE_ROOT)
     if is_bundled():
-        ws_path = root_dir.parent / process_name("ws_server")
+        ws_path = root_dir.parent / process_name("progress_server")
     else:
-        ws_path = root_dir / "webui" / process_name("ws_server")
+        ws_path = root_dir / "batch" / process_name("progress_server")
     
-    ws_cmd = get_executable(ws_path)
+    ws_cmd = get_executable(ws_path) + ["--webui"]
     ws_proc = subprocess.Popen(ws_cmd, env=os.environ.copy())
     
     # Start webui in a thread
@@ -31,7 +31,7 @@ def run_gui():
     
     webview.create_window("ELiSE", "http://127.0.0.1:8050")
     webview.start()
-    
+
     ws_proc.terminate()
     ws_proc.wait()
 
@@ -41,6 +41,10 @@ def run_webui():
 def run_cmdline(cmdargs):
     execute_simulation(cmdargs)
 
+def run_service():
+    #TODO: use the progress server as the base to build the service
+    pass
+
 def main():
     parser = argparse.ArgumentParser(prog="elise", description="The entry point of ELiSE framework")
 
@@ -49,7 +53,7 @@ def main():
 
     # Commandline
     supported_providers = ["openmpi", "intelmpi", "mp"]
-    parser.add_argument("-f", "--schematic-file", help="Provide a schematic file name")
+    parser.add_argument("-f", "--schematic-files", action="append", help="Provide a schematic file name")
     parser.add_argument("-p", "--provider", choices=supported_providers, default="mp", help="Define the provider for parallelizing tasks")
     parser.add_argument("--export_reports", default="", type=str, help="Provde a directory to export reports for each scheduler")
     
@@ -57,10 +61,11 @@ def main():
 
     if args.webui:
         run_webui()
-    elif not args.schematic_file:
+    elif not args.schematic_files:
         run_gui()
     else:
-        cmdargs = ["-f", args.schematic_file, "-p", args.provider]
+        cmdargs = [f"-f {file}" for file in args.schematic_files]
+        cmdargs.extend(["-p", args.provider])
         if args.export_reports:
             cmdargs.extend(["--export_reports", args.export_reports])
         run_cmdline(cmdargs)

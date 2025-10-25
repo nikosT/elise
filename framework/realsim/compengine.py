@@ -81,13 +81,14 @@ class ComputeEngine:
             except:
                 # Set everything to compact speedup if no list is given
                 speedups = [1]
+            
+            # Given by the LoadManager during the creation of the job
+            # The heatmap during a simulation run might be different from the generated heatmap by the LoadManager
+            min_speedup = job.min_speedup
+            max_speedup = job.max_speedup
 
-            min_speedup = speedups[0]
-            max_speedup = self.db.lm.loads[job.job_name].get_med_speedup(co_load=None)
-
-            # if no spread found failback to min speedup
             if not max_speedup:
-                max_speedup = min_speedup
+                min_speedup = max_speedup = speedups[0]
 
             accumulator = length = 0
             for speedup in speedups:

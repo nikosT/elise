@@ -4,6 +4,6 @@ __pycache__/
 *$py.class
 *.so
 
-# Specific directories you want to ignore
-api/loader/__pycache__/
-framework/**/__pycache__/
+# Building directories
+build/
+dist/

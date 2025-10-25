@@ -16,13 +16,12 @@ sys.path.append(os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..")
 ))
 from common import utils as cutils
-from webui.ws_server import main as ws_server_main
 from webui.layouts.main import main_layout
 from webui.utils.action_utils import action_item_name, action_items_names
 
 ELiSE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-# Store session information
+# Store for session information
 app_session_store = dcc.Store(
         id="app-session-store",
         storage_type="session",
@@ -31,12 +30,13 @@ app_session_store = dcc.Store(
             )
         )
 
+# Post-processing actions in the WebUI
 actions_data = {
     action_item_name(name):{"inputs": [], "schedulers": []}
     for name in action_items_names
 }
 
-# Store schematic data
+# Store for schematic configuration
 app_schematic_store = dcc.Store(
         id="app-sim-schematic",
         storage_type="session",
@@ -49,7 +49,7 @@ app_schematic_store = dcc.Store(
         )
 )
 
-# Store simulation progress
+# Store for simulation progress
 app_progress_store = dcc.Store(
     id="app-progress-store",
     storage_type="memory",
@@ -58,6 +58,7 @@ app_progress_store = dcc.Store(
     ) 
 )
 
+# Store for simulation results
 app_results_store = dcc.Store(
     id="app-results-store",
     storage_type="memory",
@@ -70,8 +71,6 @@ app = DashProxy(__name__,
                 meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
                 external_stylesheets=["assets/css/bootstrap.min.css", "assets/css/bootstrap-icons.css", "assets/css/schematic_components.css"])
 
-# Application configuration
-# app.config.suppress_callback_exceptions = True
 
 # Defining the layout
 app.layout = dbc.Container([
@@ -88,20 +87,18 @@ app.title = "ELiSE"
 app.config.update_title = None
 
 def main(ip_addr="0.0.0.0", launch_ws_server=True):
-    # ws_server_exec_path = Path(ELiSE_ROOT) / "webui" / "ws_server.py"
-    # ws_server_process = subprocess.Popen(["python", str(ws_server_exec_path)])
     if launch_ws_server:
         root_dir = Path(ELiSE_ROOT)
         if cutils.is_bundled():
-            ws_path = root_dir.parent / cutils.process_name("ws_server")
+            ws_path = root_dir.parent / cutils.process_name("progress_server")
         else:
-            ws_path = root_dir / "webui" / cutils.process_name("ws_server")
+            ws_path = root_dir / "batch" / cutils.process_name("progress_server")
         
-        ws_cmd = cutils.get_executable(ws_path)
+        ws_cmd = cutils.get_executable(ws_path) + ["--webui"]
         ws_server_proc = subprocess.Popen(ws_cmd, env=os.environ.copy())
 
     # Start application
-    gui_debug = cutils.envvar_bool_val("ELiSE_GUI_DEBUG")
+    gui_debug = cutils.envvar_bool_val("ELiSE_DEBUG")
     try:
         app.run(host=ip_addr, port=8050, debug=gui_debug)
     finally:

@@ -1,6 +1,6 @@
 # Python dependencies
+import json
 import os
-import socket
 import sys
 
 # Dash dependencies
@@ -21,20 +21,10 @@ from webui.utils.results_utils import get_experiment_results
 # elise library dipendencies
 from batch.submit import execute_simulation
 
-def get_ip():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.settimeout(0)
-    try:
-        # doesn't even have to be reachable
-        s.connect(('10.254.254.254', 1))
-        IP = s.getsockname()[0]
-    except Exception:
-        IP = '127.0.0.1'
-    finally:
-        s.close()
-    return IP
-ws_ipaddr = get_ip()
-app_progress_report = WebSocket(id="app-progress-report", url=f"ws://{ws_ipaddr}:55500")
+ws_ipaddr = "127.0.0.1"
+ws_port = 55501
+ws_url = f"ws://{ws_ipaddr}:{ws_port}"
+app_progress_report = WebSocket(id="app-progress-report", url=ws_url)
 progress_finished = dbc.Alert("The simulation has finished", id="execute-simulation-alert", duration=5000, is_open=False)
 progress_bar = dbc.Alert([
     html.H2("Simulation Progress"),
@@ -42,8 +32,8 @@ progress_bar = dbc.Alert([
     ],
     id="progress-bar-collapse",
     is_open=False, 
-    # style={"position": "fixed", "bottom": "0", "left": "0", "right": "0", "margin": "0", "width": "100%"}
 )
+
 
 @callback(
     Output("progress-bar", "value"),
@@ -52,19 +42,48 @@ progress_bar = dbc.Alert([
     prevent_initial_call=True
 )
 def update_progress_store(msg):
+    """Callback to update the progress bar if a message arrived from the progress server
+
+    Parameters
+    ----------
+    msg :   bytes, Input
+            Data sent by the progress server
+    
+    Returns
+    -------
+    tuple[int, str]
+        The value and the label of the progress bar
+    """
     data_str = str(msg["data"])
     data_str = data_str.rstrip("\x00")
-    progress = int(float(data_str))
+    data = json.loads(data_str)
+    progress = int(data["progress"])
     return progress, f"{progress} %"
+
 
 @callback(
     Output("progress-bar-collapse", "is_open"),
     Output("progress-bar-collapse", "duration"),
+    Output("progress-bar", "value", allow_duplicate=True),
+    Output("progress-bar", "label", allow_duplicate=True),
     Input("execute-simulation-btn", "n_clicks"),
     prevent_initial_call=True
 )
 def webui_show_progress(n_clicks):
-    return True, None
+    """Callback to display the progress bar
+
+    Parameters
+    ----------
+    n_clicks    :   int, Input
+                    The triggering event by click the dbc.Button with id='execute-simulation-btn' that starts the simulation.
+
+    Returns
+    -------
+    True, Any
+        Opens the progress bar at 0% value for an infinite amount of time
+    """
+    return True, None, 0, "0"
+
 
 @callback(
     Output("app-results-store", "data"),
@@ -79,6 +98,35 @@ def webui_show_progress(n_clicks):
     prevent_initial_call=True
 )
 def webui_execute_simulation(n_clicks, schematic_data, session_data, results_data, enabled_actions, provider):
+    """Callback to execute a batch of simulation configurations
+
+    Parameters
+    ----------
+        n_clicks        :   int, Input
+                            The triggering event by click the dbc.Button with id='execute-simulation-btn' that starts the simulation.
+        
+        schematic_data  :   dict, State
+                            The dcc.Store that stores the schematic data for this batch.
+        
+        session_data    :   dict, State
+                            The dcc.Store that has information about the current web session.
+
+        results_data    :   dict, State
+                            The dcc.Store that stores the results of all the simulation runs.
+        
+        enabled_actions :   list, State
+                            The list of enabled postprocessing actions.
+        
+        provider        :   str, State
+                            The provider created for launching the parallel workers.
+
+    Returns
+    -------
+    tuple[dict, bool, int]
+        Returns the new results, opens the Alert component notifying that the simulation has ended, and hides the progress 
+        bar after an integer amount of milliseconds
+    """
+
     if not n_clicks:
         raise PreventUpdate
     
