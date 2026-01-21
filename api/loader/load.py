@@ -340,7 +340,7 @@ class Load:
         load.machine = repres["machine"]
         load.suite = repres["suite"]
         load.compact_timelogs = repres["compact_timelogs"]
-        load.spread_timelogs = repres["spread_timelogs"]
+        load.spread_timelogs = repres.get("spread_timelogs", [])
         load.coscheduled_timelogs = repres["coscheduled_timelogs"]
         load.dpops = repres["dpops"]
         load.bytes_transferred = repres["bytes_transferred"]

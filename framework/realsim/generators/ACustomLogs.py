@@ -39,6 +39,14 @@ class AbstractCustomLogsGenerator(AbstractGenerator, Generic[T]):
                    submit_time=0,
                    waiting_time=0,
                    wall_time=(1.4 * load.get_med_time()))
+
+
+        # Set the min and max speedup as the spread speedup by default
+        # The correct values will be set by the ComputeEngine
+        spread_speedup = load.get_med_speedup(co_load=None)
+        job.max_speedup = spread_speedup
+        job.min_speedup = spread_speedup
+
         job.job_tag = load.get_tag()
 
         return job

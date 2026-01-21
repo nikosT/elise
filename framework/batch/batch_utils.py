@@ -1,4 +1,5 @@
 from copy import copy
+from enum import Enum
 from json import loads as json_loads
 from yaml import safe_load
 from pathlib import Path
@@ -8,6 +9,7 @@ import inspect
 import os
 import sys
 from typing import Any
+from uuid import uuid4
 
 # Introduce path to realsim
 sys.path.append(os.path.abspath(
@@ -94,10 +96,170 @@ def correct_opt_val(val: str):
     else:
         return val
 
-class BatchCreator:
 
+class SchematicAnalysis:
 
     def __init__(self, schematic_path: str, webui: bool = False):
+
+        # If it is called from WebUI the actions will be translated
+        self.__webui = webui
+        
+        # Load the configuration file
+        logger.debug(f"Opening project file: {schematic_path}")
+        self.schematic_read(schematic_path)
+
+    def schematic_read(self, schematic_path: str) -> None:
+        """Read a schematic file and configure the batch creator.
+
+        Args:
+            schematic_path (str): Path to schematic file
+        
+        Returns:
+            None
+        """
+        with open(schematic_path, "r") as fd:
+
+            self.config = safe_load(fd)
+            
+            sanity_entries = ["inputs", "schedulers", "actions"]
+
+            if list(filter(lambda x: x not in self.config, sanity_entries)):
+                raise RuntimeError("The configuration file is not properly designed")
+
+            self.__schematic_name = self.config.get("name", str(uuid4()))
+            if self.__schematic_name == "":
+                self.__schematic_name = str(uuid4())
+            self.__schematic_inputs = self.config["inputs"]
+            self.__schematic_schedulers = self.config["schedulers"]
+            self.__schematic_actions = self.config["actions"] if "actions" in self.config else dict()
+
+    def get_sim_configs_num(self) -> int:
+        logger.debug("Calculating the total number of simulation configurations")
+        inputs_num = 0
+        for input in self.__schematic_inputs:
+            inputs_num += 1 if "repeat" not in input else int(input["repeat"])
+
+        return inputs_num * len(self.__schematic_schedulers)
+    
+    @property
+    def batch_id(self):
+        return self.__schematic_name
+    
+    def analyze_inputs(self) -> None:
+
+        logger.debug("Begin analyzing and dividing inputs in schematic file.")
+
+        self.__inputs = list()
+
+        for input in self.__schematic_inputs:
+            repeat = 1
+            if "repeat" in input:
+                repeat = int(input["repeat"])
+            self.__inputs.extend([input for _ in range(repeat)])
+    
+    def analyze_schedulers(self) -> None:
+
+        logger.debug("Begin analyzing schedulers in schematic file.")
+        self.__schedulers = self.__schematic_schedulers
+    
+    def analyze_actions(self) -> None:
+        """
+        The structure of __actions
+        actions = {
+            input0 = {
+                scheduler0 = [],
+                scheduler1 = [],
+                ..
+                schedulerM = []
+            },
+            ..
+            inputN = {
+                scheduler0 = []
+                scheduler1 = []
+                ..
+                schedulerM = []
+            }
+        }
+        The structure of __extra_features is a list of (arg: str, val: T) tuples
+        __extra_features = [(arg0, val0), (arg1, val1), ...]
+        """
+
+        logger.debug("Begin analyzing the postprocessing actions in the schematic file.")
+
+        # Define __actions
+        self.__actions = dict()
+        for input_index in range(len(self.__inputs)):
+            input_dict = dict()
+            for sched_index in range(len(self.__schedulers)):
+                input_dict.update({sched_index: []})
+            self.__actions.update({input_index: input_dict})
+
+        # Define __extra_features
+        self.__extra_features: list[tuple] = list()
+
+        for action in self.__schematic_actions:
+            action_inputs = self.__schematic_actions[action]["inputs"]
+            action_schedulers = self.__schematic_actions[action]["schedulers"]
+
+            action_extra_features = [(arg, val) 
+                                     for arg, val in self.__schematic_actions[action].items() 
+                                     if arg not in ["inputs", "schedulers"]]
+
+            # Simple implementation is to overwrite an argument with the latest
+            # value provided in the project file
+            self.__extra_features.extend(action_extra_features)
+
+            if action_inputs == "all":
+                for input_dict in self.__actions.values():
+                    if action_schedulers == "all":
+                        for sched_dict in input_dict.values():
+                            sched_dict.append(translate_action(action, self.__webui))
+                    else:
+                        for sched_index in action_schedulers:
+                            input_dict[sched_index].append(translate_action(action, self.__webui))
+            else:
+                for input_index in action_inputs:
+                    if action_schedulers == "all":
+                        for sched_dict in self.__actions[input_index].values():
+                            sched_dict.append(translate_action(action, self.__webui))
+                    else:
+                        for sched_index in action_schedulers:
+                            self.__actions[input_index][sched_index].append(translate_action(action, self.__webui))
+
+    @property
+    def batch(self) -> list:
+
+        self.analyze_inputs()
+        self.analyze_schedulers()
+        self.analyze_actions()
+
+        __batch = list()
+
+        sim_idx = 0
+        for inp_idx, inp in enumerate(self.__inputs):
+            for sched_idx, scheduler in enumerate(self.__schedulers):
+                actions = self.__actions[inp_idx][sched_idx]
+
+                __batch.append((self.batch_id, sim_idx, inp_idx, sched_idx, inp, scheduler, actions, self.__extra_features))
+
+                sim_idx += 1
+        
+        return __batch
+                
+
+
+class SimConfigCreator:
+
+    def __init__(self, batch: list):
+
+        self.batch_id,\
+        self.sim_idx,\
+        self.inp_idx,\
+        self.sched_idx,\
+        self.inp_cfg,\
+        self.sched_cfg,\
+        self.act_cfg,\
+        self.extra_features = batch
 
         # Ready to use generators implementing the AbstractGenerator interface
         self.__impl_generators = {}
@@ -131,47 +293,8 @@ class BatchCreator:
                 scheduler_name = sched_key
             self.__impl_schedulers[scheduler_name] = sched_val["obj"]
         
-        # If it is called from WebUI the actions will be translated
-        self.__webui = webui
-        
-        # Load the configuration file
-        logger.debug(f"Opening project file: {schematic_path}")
-        self.schematic_read(schematic_path)
-
         # If using MPI store modules that should be exported to other MPI procs
         self.mods_export = list()
-
-    def schematic_read(self, schematic_path: str) -> None:
-        """Read a schematic file.
-
-        Args:
-            schematic_path (str): Path to schematic file
-        
-        Returns:
-            None
-        """
-        with open(schematic_path, "r") as fd:
-
-            self.config = safe_load(fd)
-            
-            sanity_entries = ["name", "inputs", "schedulers", "actions"]
-
-            if list(filter(lambda x: x not in self.config, sanity_entries)):
-                raise RuntimeError("The configuration file is not properly designed")
-
-            self.__schematic_name = self.config["name"]
-            self.__schematic_inputs = self.config["inputs"]
-            self.__schematic_schedulers = self.config["schedulers"]
-            self.__schematic_actions = self.config["actions"] if "actions" in self.config else dict()
-
-    def get_sim_configs_num(self) -> int:
-        logger.debug("Calculating the total number of simulation configurations")
-        inputs_num = 0
-        for input in self.__schematic_inputs:
-            inputs_num += 1 if "repeat" not in input else int(input["repeat"])
-
-        return inputs_num * len(self.__schematic_schedulers)
-    
 
     def __get_class_from_file(self, file: str, root_cls: object, export_module: bool = False) -> object:
         # Import generator module
@@ -220,278 +343,193 @@ class BatchCreator:
 
         # A LoadManager instance can be created using
         if "path" in input:
+            logger.debug("Reading from a directory of logs.")
             # A path to a directory with the real logs
             path = input["path"]
-            lm = LoadManager(machine=input["loads-machine"], suite=input["loads-suite"])
             lm.init_loads(runs_dir=path)
         elif "load-manager" in input:
+            logger.debug("Reading from a pickled LoadManager.")
             # A pickled LoadManager instance (or json WIP)
             with open(input["load-manager"], "rb") as fd:
                 lm = pickle_load(fd)
         elif "db" in input:
+            logger.debug("Reading from a database.")
             # A mongo database url
             lm.import_from_db(host=input["db"], dbname="storehouse")
         elif "json" in input:
+            logger.debug("Reading from a JSON file.")
             lm.import_from_json(input["json"])
         else:
+            logger.debug("No valid source was given.")
             raise RuntimeError("Couldn't provide a way to create a LoadManager")
         
         return lm
     
     def __input_generate_heatmap(self, input: dict, lm: LoadManager) -> dict:
+
         # Create a heatmap from the LoadManager instance or use a user-defined
         # if a path is provided
         if "heatmap" in input:
             path = input["heatmap"]
+            logger.debug(f"Reading heatmap from file: {path}")
             if os.path.exists(path):
-                logger.debug("Reading heatmap from file.")
                 with open(input["heatmap"], "r") as fd:
                     heatmap = json_loads(fd.read())
             else:
                 logger.debug(f"Heatmap file: {path} doesn't exist. Generating heatmap from LoadManager.")
+                heatmap = lm.export_heatmap()
         else:
+            logger.debug("No heatmap file was given. Generating heatmap from the LoadManager.")
             heatmap = lm.export_heatmap()
         
         return heatmap
 
 
-    def process_inputs(self) -> None:
+    def process_input_config(self) -> tuple:
 
-        logger.debug("Begin processing the inputs.")
+        logger.debug("Begin processing the input configuration.")
 
-        # Process the inputs
-        self.__inputs = list()
+        # Read from raw data
+        logger.debug("Begin reading input data.")
+        try:
+            lm = self.__input_read_from_source(self.inp_cfg)
+        except Exception as e:
+            logger.exception(e)
+            lm = None
+        logger.debug("Finished reading input data.")
 
-        for input in self.__schematic_inputs:
-        
-            # Read from raw data
+        # Generate heatmap
+        logger.debug("Begin generating the heatmap.")
+        heatmap = self.__input_generate_heatmap(self.inp_cfg, lm) #TODO: check if no LoadManager is given/created
+        logger.debug("Finished generating the heatmap")
+
+        logger.debug(f"Finished calculating the heatmap: {heatmap}")
+
+        # Create cluster
+        nodes = int(self.inp_cfg["cluster"]["nodes"])
+        socket_conf = tuple(self.inp_cfg["cluster"]["socket-conf"])
+        logger.debug(f"Capturing cluster configuration. Nodes: {nodes}, Socket Configuration: {socket_conf}.")
+
+        # Create the workload
+        logger.debug("Begin creating the workload.")
+        if "generator" in self.inp_cfg:
+
+            logger.debug("A generator was provided.")
+
+            generator = self.inp_cfg["generator"]
+            gen_type = generator["type"]
+            gen_arg = generator["arg"]
+
             try:
-                lm = self.__input_read_from_source(input)
-                self.lm = lm
+                gen_cls = self.__get_class_from_module(cls_info=gen_type, root_cls=AbstractGenerator, loaded_classes=self.__impl_generators)
             except Exception as e:
-                logger.exception(e)
+                logger.exception(e.with_traceback(None))
+            
+            gen_inst = gen_cls(load_manager=lm)
 
-            # Generate heatmap
-            heatmap = self.__input_generate_heatmap(input, lm)
+            logger.debug(f"Got the generator: {gen_inst.name}. Creating the initial workload.")
 
-            logger.debug(f"Finished calculating the heatmap: {heatmap}")
+            gen_input = gen_inst.generate_jobs_set(gen_arg)
 
-            # Create cluster
-            nodes = int(input["cluster"]["nodes"])
-            socket_conf = tuple(input["cluster"]["socket-conf"])
+            logger.debug(f"Finished generating the workload.")
 
+            # Check if a transformer distribution is provided by the user
+            if "distribution" in generator:
 
-            # Create the input using the generator provided
-            if "generator" in input:
-                generator = input["generator"]
-                gen_type = generator["type"]
-                gen_arg = generator["arg"]
+                logger.debug("A distribution was provided.")
+            
+                distribution = generator["distribution"]
+                distr_type = distribution["type"]
+                distr_arg = distribution["arg"]
 
+                # If a path is provided for the distribution transformer
                 try:
-                    gen_cls = self.__get_class_from_module(cls_info=gen_type, root_cls=AbstractGenerator, loaded_classes=self.__impl_generators)
+                    distr_cls = self.__get_class_from_module(cls_info=distr_type, root_cls=IDistribution, loaded_classes=self.__impl_distributions)
                 except Exception as e:
                     logger.exception(e.with_traceback())
-                
-                gen_inst = gen_cls(load_manager=lm)
+
+                distr_inst = distr_cls()
+                distr_inst.apply_distribution(gen_input, time_step=distr_arg)
+
+                logger.debug(f"A distribution was applied to the input: {distr_inst.name}.")
             
-                logger.debug(f"Got the generator: {gen_inst.name}")
-
-                if "repeat" in input:
-                    repeat = int(input["repeat"])
-                else:
-                    repeat = 1
-                
-                for _ in range(repeat):
-
-                    gen_input = gen_inst.generate_jobs_set(gen_arg)
-                    # Generate the input
-                    # if gen_type in ["List Generator","Shuffle List Generator"]:
-                    #     with open(gen_arg, 'r') as _f:
-                    #         gen_data = _f.read()
-                    #     gen_input = gen_inst.generate_jobs_set(gen_data)
-
-                    # elif gen_type in ["Random From List Generator"]:
-                    #     with open(gen_arg[1], 'r') as _f:
-                    #         gen_data = _f.read()
-                    #     gen_input = gen_inst.generate_jobs_set([gen_arg[0], gen_data])
-
-                    # else:
-                    #     gen_input = gen_inst.generate_jobs_set(gen_arg)
-
-
-                    logger.debug(f"Finished generating the input.")
-
-                    # Check if a transformer distribution is provided by the user
-                    if "distribution" in generator:
-                    
-                        distribution = generator["distribution"]
-                        distr_type = distribution["type"]
-                        distr_arg = distribution["arg"]
-
-                        # If a path is provided for the distribution transformer
-                        try:
-                            distr_cls = self.__get_class_from_module(cls_info=distr_type, root_cls=IDistribution, loaded_classes=self.__impl_distributions)
-                        except Exception as e:
-                            logger.exception(e.with_traceback())
-
-                        distr_inst = distr_cls()
-                        distr_inst.apply_distribution(gen_input, time_step=distr_arg)
-
-                        logger.debug(f"A distribution was applied to the input: {distr_inst.name}.")
-                    
-                    self.__inputs.append((gen_input, heatmap, nodes, socket_conf))
-
             else:
-                raise RuntimeError("A generator was not provided")
+                logger.debug("A distribution was not applied to the initial workload.")
+            
+            logger.debug("Finished creating the workload.")
 
+            logger.debug("Returning the workload, heatmap and cluster configuration.")
+            return gen_input, heatmap, nodes, socket_conf
 
-        logger.debug("Finished processing the inputs.")
+        else:
+            raise RuntimeError("A generator to create the workload was not provided.")
 
-    def process_schedulers(self) -> None:
+    def process_scheduler_config(self) -> tuple:
 
-        logger.debug("Begin processing the schedulers")
+        logger.debug(f"Begin processing the scheduler configuration: {self.sched_cfg}.")
 
-        # Process the schedulers
-        # The first one in the list will always be the default
-        self.__schedulers = list()
+        base_scheduler = self.sched_cfg["base"]            
+
+        if os.path.exists(base_scheduler) and ".py" in base_scheduler:
+            spec_name = import_module(base_scheduler)
+            sched_mod = sys.modules[spec_name]
+            classes = inspect.getmembers(sched_mod, inspect.isclass)
+            classes = list(filter(lambda it: not inspect.isabstract(it[1]) and issubclass(it[1], Scheduler), classes))
+            # If there are multiple then inform the user that the first will be used
+            if len(classes) > 1:
+                logger.info(f"Multiple scheduler definitions were found. Using the first definition: {classes[0][0]}")
+
+            _, sched_cls = classes[0]
+
+            # To export modules for MPI procs
+            print(base_scheduler)
+            self.mods_export.append(base_scheduler)
+        else:
+            try:
+                sched_cls = self.__impl_schedulers[base_scheduler]
+            except:
+                raise RuntimeError(f"Scheduler of type {base_scheduler} does not exist")
         
-        # Because there might multiple schedulers with the same name but different arguments
-        # give each one of them an index
+        # Get scheduler options
+        sched_opts = [(opt, val) for opt, val in self.sched_cfg.items() if opt != "base"]
 
-        for sched_index, sched_dict in enumerate(self.__schematic_schedulers):
-            
-            base_scheduler = sched_dict["base"]            
+        logger.debug(f"Finished processing the scheduler configuration.")
+        return sched_cls, sched_opts
 
-            if os.path.exists(base_scheduler) and ".py" in base_scheduler:
-                spec_name = import_module(base_scheduler)
-                sched_mod = sys.modules[spec_name]
-                classes = inspect.getmembers(sched_mod, inspect.isclass)
-                classes = list(filter(lambda it: not inspect.isabstract(it[1]) and issubclass(it[1], Scheduler), classes))
-                # If there are multiple then inform the user that the first will be used
-                if len(classes) > 1:
-                    print(f"Multiple scheduler definitions were found. Using the first definition: {classes[0][0]}")
+    @property
+    def simconfig(self) -> list:
 
-                _, sched_cls = classes[0]
+        workload, heatmap, nodes, socket_conf = self.process_input_config()
 
-                # To export modules for MPI procs
-                print(base_scheduler)
-                self.mods_export.append(base_scheduler)
-            else:
-                try:
-                    sched_cls = self.__impl_schedulers[base_scheduler]
-                except:
-                    raise RuntimeError(f"Scheduler of type {base_scheduler} does not exist")
-            
-            # Get scheduler options
-            sched_opts = [(opt, val) for opt, val in sched_dict.items() if opt != "base"]
+        # Create a database instance
+        database = Database(deepcopy_list(workload), heatmap)
+        database.setup()
 
-            self.__schedulers.append((sched_index, sched_cls, sched_opts))
-            sched_index += 1
+        # Create a cluster instance
+        cluster = Cluster(nodes, socket_conf)
 
-        logger.debug(f"Finished processing the schedulers: {self.__schedulers}")
+        sched_cls, sched_opts = self.process_scheduler_config()
+        # Create a scheduler instance
+        scheduler = sched_cls()
+        # Apply options to scheduler instance
+        for opt, val in sched_opts:
+            scheduler.__dict__[opt] = val
 
-    def process_actions(self) -> None:
-        """
-        The structure of self.__actions
-        actions = {
-            input0 = {
-                scheduler0 = [],
-                scheduler1 = [],
-                ..
-                schedulerM = []
-            },
-            ..
-            inputN = {
-                scheduler0 = []
-                scheduler1 = []
-                ..
-                schedulerM = []
-            }
-        }
-        The structure of self.__extra_features is a list of (arg: str, val: T) tuples
-        self.__extra_features = [(arg0, val0), (arg1, val1), ...]
-        """
+        # Create a logger instance
+        evt_logger = Logger(debug=False)
 
-        logger.debug("Begin processing the postprocessing actions")
+        # Create a compute engine instance
+        compengine = ComputeEngine(database, cluster, scheduler, evt_logger)
+        compengine.setup_preloaded_jobs()
 
-        # Define __actions
-        self.__actions = dict()
-        for input_index in range(len(self.__inputs)):
-            input_dict = dict()
-            for sched_index, _, _ in self.__schedulers:
-                input_dict.update({sched_index: []})
-            self.__actions.update({input_index: input_dict})
-
-        # Define __extra_features
-        self.__extra_features: list[tuple] = list()
-
-        for action in self.__schematic_actions:
-            action_inputs = self.__schematic_actions[action]["inputs"]
-            action_schedulers = self.__schematic_actions[action]["schedulers"]
-
-            action_extra_features = [(arg, val) 
-                                     for arg, val in self.__schematic_actions[action].items() 
-                                     if arg not in ["inputs", "schedulers"]]
-
-            # Simple implementation is to overwrite an argument with the latest
-            # value provided in the project file
-            self.__extra_features.extend(action_extra_features)
-
-            if action_inputs == "all":
-                for input_dict in self.__actions.values():
-                    if action_schedulers == "all":
-                        for sched_dict in input_dict.values():
-                            sched_dict.append(translate_action(action, self.__webui))
-                    else:
-                        for sched_index in action_schedulers:
-                            input_dict[sched_index].append(translate_action(action, self.__webui))
-            else:
-                for input_index in action_inputs:
-                    if action_schedulers == "all":
-                        for sched_dict in self.__actions[input_index].values():
-                            sched_dict.append(translate_action(action, self.__webui))
-                    else:
-                        for sched_index in action_schedulers:
-                            self.__actions[input_index][sched_index].append(translate_action(action, self.__webui))
-
-        logger.debug(f"Finished processing the postprocessing actions: {self.__extra_features}")
-
-    def create_ranks(self) -> None:
-        self.process_inputs()
-        self.process_schedulers()
-        self.process_actions()
-
-        # Id for the simulation run
-        sim_idx = 0
-
-        # Create the ranks
-        self.ranks = list()
-        for input_index, [input, heatmap, nodes, socket_conf] in enumerate(self.__inputs):
-            for [sched_index, sched_cls, sched_opts] in self.__schedulers:
-                
-                # Create a database instance
-                database = Database(deepcopy_list(input), heatmap, lm=self.lm)
-                database.setup()
-
-                # Create a cluster instance
-                cluster = Cluster(nodes, socket_conf)
-
-                # Create a scheduler instance
-                scheduler = sched_cls()
-                # Apply options to scheduler instance
-                for opt, val in sched_opts:
-                    scheduler.__dict__[opt] = val
-
-                # Create a logger instance
-                evt_logger = Logger(debug=False)
-
-                # Create a compute engine instance
-                compengine = ComputeEngine(database, cluster, scheduler, evt_logger)
-                compengine.setup_preloaded_jobs()
-
-                # Set actions for this simulation
-                actions = self.__actions[input_index][sched_index]
-
-                self.ranks.append((sim_idx, input_index, sched_index, database, cluster, scheduler, evt_logger, compengine, actions, self.__extra_features))
-
-                sim_idx += 1
+        return [self.batch_id, 
+                self.sim_idx, 
+                self.inp_idx, 
+                self.sched_idx, 
+                database, 
+                cluster, 
+                scheduler, 
+                evt_logger, 
+                compengine, 
+                self.act_cfg, 
+                self.extra_features]
