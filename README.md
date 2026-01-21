@@ -90,20 +90,22 @@ A schematic file needs to be provided as input in order to execute ELiSE in batc
 ```bash
 conda activate elise
 cd framework
-python elise.py -f schematic.yml -p [mp,openmpi,intelmpi]
+python elise.py -f schematic.yml -p [mp,openmpi,intelmpi] --export_reports dir
 ```
 
 **Distributable in Linux**
 ```bash
 cd /path/to/installed/elise
-./elise -f schematic.yml -p [mp,openmpi,intelmpi]
+./elise -f schematic.yml -p [mp,openmpi,intelmpi] --export_reports dir
 ```
 
 **Distributable in Windows**
 ```powershell
 cd \path\to\installed\elise
-.\elise -f schematic.yml -p [mp,openmpi,intelmpi]
+.\elise -f schematic.yml -p [mp,openmpi,intelmpi] --export_reports dir
 ```
+* `--export_reports <dir>` Provide a directory to export reports for each scheduler
+
 
 ### Distributed Execution
 
