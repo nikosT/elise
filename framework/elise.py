@@ -55,7 +55,7 @@ def main():
     supported_providers = ["openmpi", "intelmpi", "mp"]
     parser.add_argument("-f", "--schematic-files", action="append", help="Provide a schematic file name")
     parser.add_argument("-p", "--provider", choices=supported_providers, default="mp", help="Define the provider for parallelizing tasks")
-    parser.add_argument("--export_reports", default="", type=str, help="Provde a directory to export reports for each scheduler")
+    parser.add_argument("--export_reports", default="", type=str, help="Provide a directory to export reports for each scheduler")
     
     args = parser.parse_args()
 
