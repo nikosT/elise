@@ -213,7 +213,7 @@ def execute_simulation(cmdargs=None):
     parser = argparse.ArgumentParser(description="Provide a batch schematic file and a parallelizing provider to run simulations")
     parser.add_argument("-f", "--schematic-files", action="append", help="Provide (a) batch schematic file(s)", required=True)
     parser.add_argument("-p", "--provider", choices=supported_providers, default="mp", help="Define the provider for parallelizing tasks")
-    parser.add_argument("--export_reports", default="", type=str, help="Provde a directory to export reports for each scheduler")
+    parser.add_argument("--export_reports", default="", type=str, help="Provide a directory to export reports for each scheduler")
     parser.add_argument("--webui", default=False, action="store_true")
 
     if cmdargs is not None:
