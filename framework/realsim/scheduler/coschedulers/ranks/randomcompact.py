@@ -35,9 +35,6 @@ class RandomCompactCoscheduler(RanksCoscheduler):
 
             # Remove from the waiting queue
             job = self.pop(waiting_queue)
-            # print job name in file /home/nikos/Desktop/test
-            with open("/home/nikos/Desktop/test", "a") as f:
-                f.write(f"{job.job_name}\n")
 
             if 'compact' in job.job_name:
                 # do compact if it is written in the job name, otherwise do colocate
