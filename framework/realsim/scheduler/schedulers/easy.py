@@ -20,6 +20,7 @@ class EASYScheduler(FIFOScheduler):
     def __init__(self):
         FIFOScheduler.__init__(self)
         self.backfill_enabled = True
+        self.backfill_depth = 100
 
     def backfill(self) -> bool:
 
