@@ -166,7 +166,7 @@ class ComputeEngine:
             # It is executing as compact
             return
 
-        for hostname in job.assigned_hosts:
+        for h, hostname in enumerate(job.assigned_hosts):
             for i, co_job_signature in enumerate(list(self.cluster.hosts[hostname].jobs.keys())):
 
                 # Shouldn't check with ourselves
@@ -183,7 +183,7 @@ class ComputeEngine:
                     speedup = job.avg_speedup
                 if speedup < worst_speedup:
                     worst_speedup = speedup
-                    if i > 0:
+                    if (h > 0) or (h==0 and i>0):
                         # If the job is not allocated in the first socket then it is a straggler
                         self.straggler_count += 1
 
