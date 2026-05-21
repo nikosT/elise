@@ -1,5 +1,6 @@
 import os
 import sys
+import hashlib
 
 sys.path.append(os.path.abspath(os.path.join(
     os.path.dirname(__file__), "../../../../"
@@ -18,6 +19,11 @@ class StragglerCoscheduler(RandomRanksCoscheduler):
     description = """Co-scheduler that tries to fill the ''holes'' 
     in the HPC system's resources created by the allocation of jobs inside"""
 
+    def str_to_uniq_int(self, text):
+        """Convert string to unique integer using MD5 hash"""
+        hash_obj = hashlib.md5(text.encode())
+        return int(hash_obj.hexdigest(), 16)
+
     def host_alloc_condition(self, hostname, job):
         # Get all the executing jobs in the host
         co_job_sigs = list(self.cluster.hosts[hostname].jobs.keys())
@@ -25,25 +31,19 @@ class StragglerCoscheduler(RandomRanksCoscheduler):
         # If there are not then the execution will be spread and we want to
         # promote this
         if co_job_sigs == []:
-            return inf # but it can also set to return (inf, inf)..n things for sorting
+            return (inf, inf) # but it can also set to return (inf, inf)..n things for sorting
         
-        cases = []
-        for xjob in self.cluster.execution_list:
-            sp_job_xjob = self.database.heatmap[job.job_name][xjob.job_name]
-            sp_xjob_job = self.database.heatmap[xjob.job_name][job.job_name]
+        # Get the co-scheduled jobs as objects from the execution list
+        co_jobs = [x for x in self.cluster.execution_list if x.get_signature() in co_job_sigs]
 
-            if sp_job_xjob is None or sp_xjob_job is None:
-                continue
+        # do not promote cases where more than 1 pairings happen within the same host/node
+        if not len(co_jobs) == 1:
+            return (-inf, inf)
 
-            job_new_remaining_time = job.remaining_time / sp_job_xjob
-            xjob_new_remaining_time = xjob.remaining_time / sp_xjob_job
-
-            w_job = job.num_of_processes / sum(self.cluster.socket_conf)
-            w_xjob = xjob.num_of_processes / sum(self.cluster.socket_conf)
-
-            cases.append(abs(job_new_remaining_time*w_job - xjob_new_remaining_time*w_xjob))
-
-        # because later sorting is in descending order (reverse=True)
-        # and the metric need to be minimized
-        return -max(cases)
-            
+        # the idea is to promote hosts that have a same processes job as the one we want to schedule,
+        # so we try to fill the holes in the resources of the system (and also avoid straggler effect)
+        # tie braker is the job name to make sure that the order is as less straggling as possible
+        try:
+            return (1/(co_jobs[0].num_of_processes-job.num_of_processes), self.str_to_uniq_int(co_jobs[0].job_name))
+        except ZeroDivisionError:
+            return (inf, self.str_to_uniq_int(co_jobs[0].job_name))
