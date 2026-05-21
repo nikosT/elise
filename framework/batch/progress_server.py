@@ -131,7 +131,8 @@ def progress_server(server_ipaddr: str,
                            "Scheduler Name", 
                            "Real Time", 
                            "Simulated Time", 
-                           "Time Ratio (Simulated Days / 1 real hour)"]
+                           "Time Ratio (Simulated Days / 1 real hour)",
+                           "Straggler Count"]
                 
                 if batch_info["export_reports"] != "":
                     export_reports = batch_info["export_reports"]
@@ -252,13 +253,14 @@ def progress_server(server_ipaddr: str,
                                 real_time = float(msg_dict["real_time"])
                                 sim_time = float(msg_dict["sim_time"])
                                 time_ratio = sim_time / (24 * real_time)
+                                straggler_count = int(msg_dict["straggler_count"])
 
                                 batch_map[batch_id]["timers"][sim_idx] = [
                                     str(inp_idx), str(sched_idx), str(scheduler_name),
                                     str(timedelta(seconds=real_time)).replace(", ", "_"),
                                     str(timedelta(seconds=sim_time)).replace(", ", "_"),
-                                    str(time_ratio)
-
+                                    str(time_ratio),
+                                    str(straggler_count)
                                 ]
 
                                 batch_map[batch_id]["#rem_configs"] -= 1

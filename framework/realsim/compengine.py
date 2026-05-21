@@ -48,6 +48,8 @@ class ComputeEngine:
         # Features for compengine
         self.wall_time_ratio = 0
 
+        self.straggler_count = 0
+
     # Database preloaded queue setup
     def setup_preloaded_jobs(self) -> None:
         """Setup the preloaded jobs that are currently stored in the database
@@ -165,7 +167,7 @@ class ComputeEngine:
             return
 
         for hostname in job.assigned_hosts:
-            for co_job_signature in list(self.cluster.hosts[hostname].jobs.keys()):
+            for i, co_job_signature in enumerate(list(self.cluster.hosts[hostname].jobs.keys())):
 
                 # Shouldn't check with ourselves
                 if job.get_signature() == co_job_signature:
@@ -181,6 +183,9 @@ class ComputeEngine:
                     speedup = job.avg_speedup
                 if speedup < worst_speedup:
                     worst_speedup = speedup
+                    if i > 0:
+                        # If the job is not allocated in the first socket then it is a straggler
+                        self.straggler_count += 1
 
         # Recalculate the remaining time of the job and the current speedup
 

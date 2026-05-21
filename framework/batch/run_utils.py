@@ -313,7 +313,8 @@ def single_simulation(sim_batch, sock, webui=False):
             "sched_id": sched_idx, 
             "scheduler": scheduler.name, 
             "real_time": real_time, 
-            "sim_time": sim_time
+            "sim_time": sim_time,
+            "straggler_count": compengine.straggler_count
         },
         json_fmt=True,
         close_on_sent=False,
