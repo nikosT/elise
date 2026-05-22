@@ -47,3 +47,62 @@ class StragglerCoscheduler(RandomRanksCoscheduler):
             return (1/(co_jobs[0].num_of_processes-job.num_of_processes), self.str_to_uniq_int(co_jobs[0].job_name))
         except ZeroDivisionError:
             return (inf, self.str_to_uniq_int(co_jobs[0].job_name))
+        
+    # def waiting_queue_reorder(self, job: Job) -> float:
+    #     # The job that is closer to cover the gaps is more preferrable
+    #     sys_free_cores = self.cluster.get_idle_cores()
+    #     if sys_free_cores > 0:
+    #         diff = sys_free_cores - job.num_of_processes
+    #         if diff > 0:
+    #             factor0 = 1 - (diff/sys_free_cores)
+    #         elif diff == 0:
+    #             factor0 = 1
+    #         else:
+    #             factor0 = -1
+    #     else:
+    #         factor0 = 1
+
+    #     factor1 = ((job.job_id + 1) / len(self.cluster.waiting_queue))
+
+    #     return factor0 / factor1
+
+    def waiting_queue_reorder(self, job: Job) -> float:
+
+        for host in self.cluster.hosts.values():
+            co_job_sigs = list(host.jobs.keys())
+            if co_job_sigs == []:
+                return 1
+
+            co_jobs = [x for x in self.cluster.execution_list if x.get_signature() in co_job_sigs]
+            for co_job in co_jobs:
+                if co_job.num_of_processes == job.num_of_processes:
+                    return 0.9
+                
+        return 0.0
+    
+    def deploy(self) -> bool:
+
+        deployed = False
+
+        # Update the rank of each job before scheduling them
+        # self.update_ranks()
+
+        waiting_queue = deepcopy_list(self.cluster.waiting_queue[:self.queue_depth])
+        waiting_queue.sort(key=lambda job: self.waiting_queue_reorder(job),
+                            reverse=True)
+                            
+        while waiting_queue != []:
+
+            # Remove from the waiting queue
+            job = self.pop(waiting_queue)
+
+            # Colocate
+            if self.allocation(job, self.cluster.half_socket_allocation):
+                deployed = True
+                self.after_deployment()
+ #               waiting_queue.sort(key=lambda job: self.waiting_queue_reorder(job),
+ #                           reverse=True)
+            #else:
+            #    break
+
+        return deployed
