@@ -44,6 +44,7 @@ class AbstractCustomLogsGenerator(AbstractGenerator, Generic[T]):
         # Set the min and max speedup as the spread speedup by default
         # The correct values will be set by the ComputeEngine
         spread_speedup = load.get_med_speedup(co_load=None)
+        job.spread_speedup = (spread_speedup if load.spread_timelogs else None)
         job.max_speedup = spread_speedup
         job.min_speedup = spread_speedup
 

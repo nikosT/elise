@@ -63,6 +63,8 @@ class Job:
         self.sim_speedup: float = 1
         self.avg_speedup: float = 1
         self.max_speedup: float = 1
+        # Measured unpaired spread speedup, independent of the pair heatmap.
+        self.spread_speedup = None
         self.min_speedup: float = 1
 
         # Job tag for models
@@ -132,6 +134,7 @@ class Job:
         copy.sim_speedup = self.sim_speedup
         copy.avg_speedup = self.avg_speedup
         copy.max_speedup = self.max_speedup
+        copy.spread_speedup = self.spread_speedup
         copy.min_speedup = self.min_speedup
 
         copy.current_state = self.current_state
