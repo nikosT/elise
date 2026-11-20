@@ -1,5 +1,5 @@
 # Utilities
-from math import inf, ceil
+from math import inf, ceil, isfinite
 import numpy as np
 import os
 import sys
@@ -149,59 +149,73 @@ class ComputeEngine:
                 #    break
 
     # Job execution/deploying/cleaning computations
-    def calculate_job_rem_time(self, job: Job) -> None:
+    def _host_speedup(self, job: Job, hostname: str, executing_jobs: dict) -> float:
+        """Speedup of the active portion of a job on a given host.
 
-        self.debug_logger.debug(f"Calculating remaining execution time of job {job.get_signature()} with inital value {job.remaining_time}")
+        Finished local portions remain allocated, but no longer impose
+        computational interference on jobs co-located on that host.
+        """
+        if job.socket_conf == self.cluster.socket_conf:
+            return 1.0  # Compact exclusive allocation
 
-        # The worst possible speedup
-        worst_speedup = job.max_speedup
-
-        # Important flags
-        neighbors_exist = False
-        spread_allocation = not (job.socket_conf == self.cluster.socket_conf)
-        
-        if not spread_allocation:
-            # It is executing as compact
-            return
-
-        for hostname in job.assigned_hosts:
-            for co_job_signature in list(self.cluster.hosts[hostname].jobs.keys()):
-
-                # Shouldn't check with ourselves
-                if job.get_signature() == co_job_signature:
-                    continue
-
-                neighbors_exist = True
-
-                co_job_name = co_job_signature.split(":")[-1]
-                speedup = self.db.heatmap[job.job_name][co_job_name]
-                # If we do not have knowledge of the job's speedup when co-allocated
-                # to the specific co-job then use the average speedup
-                if speedup is None:
-                    speedup = job.avg_speedup
-                if speedup < worst_speedup:
-                    worst_speedup = speedup
-
-        # Recalculate the remaining time of the job and the current speedup
-
-        # If there exist neighbors beside the job in one of the hosts then
-        # co-execution
-        if neighbors_exist:
-            # Change only if the worst speedup is different from the current
-            # speedup of the job
-            if job.sim_speedup != worst_speedup:
-                job.remaining_time *= (job.sim_speedup / worst_speedup)
-                job.sim_speedup = worst_speedup
-        # If no neighbors exist
+        if job.spread_speedup is not None:
+            if not isfinite(job.spread_speedup) or job.spread_speedup <= 0:
+                raise ValueError(f"Invalid spread speedup for {job.get_signature()}")
+            speedup = job.spread_speedup
         else:
-            # If it is spread allocated check to change the rem time
-            if spread_allocation:
-                # Change if it had neighbors but now it is executing alone
-                if job.sim_speedup != worst_speedup:
-                    job.remaining_time *= (job.sim_speedup / worst_speedup)
-                    job.sim_speedup = worst_speedup
+            # No measured spread speedup: approximate using the best
+            # available co-location speedup for this application.
+            valid = [
+                value for value in self.db.heatmap.get(job.job_name, {}).values()
+                if isinstance(value, (int, float))
+                and isfinite(value) and value > 0
+            ]
+            speedup = max(valid, default=1.0)
 
-        self.debug_logger.debug(f"Calculated remaining execution time of job {job.get_signature()} with new value {job.remaining_time}")
+        for signature in self.cluster.hosts[hostname].jobs:
+            if signature == job.get_signature():
+                continue
+            neighbor = executing_jobs.get(signature)
+            if neighbor is None or neighbor.host_remaining_work.get(hostname, 0) <= 0:
+                continue
+            pair_speedup = self.db.heatmap[job.job_name][neighbor.job_name]
+            if pair_speedup is None:
+                pair_speedup = job.avg_speedup
+            speedup = min(speedup, pair_speedup)
+
+        if speedup <= 0:
+            raise ValueError(f"Non-positive speedup for {job.get_signature()} on {hostname}")
+        return speedup
+
+    def calculate_job_rem_time(self, job: Job, executing_jobs: dict = None) -> None:
+        """Estimate completion from the last active host portion.
+
+        Host work is tracked in compact-equivalent execution seconds.
+        """
+        if executing_jobs is None:
+            executing_jobs = {
+                other.get_signature(): other for other in self.cluster.execution_list
+            }
+        if not job.host_remaining_work and job.assigned_hosts:
+            job.host_remaining_work = {
+                host: float(job.remaining_time) for host in job.assigned_hosts
+            }
+
+        job.host_speedups = {}
+        remaining = 0.0
+        critical_speedup = job.sim_speedup
+        for hostname, work in job.host_remaining_work.items():
+            if work <= 0:
+                continue
+            speedup = self._host_speedup(job, hostname, executing_jobs)
+            job.host_speedups[hostname] = speedup
+            local_remaining = work / speedup
+            if local_remaining > remaining:
+                remaining = local_remaining
+                critical_speedup = speedup
+
+        job.remaining_time = remaining
+        job.sim_speedup = critical_speedup
 
     def deploy_job_to_host(self, hostname: str, job: Job, psets: list[ProcSet]) -> None:
 
@@ -240,6 +254,13 @@ class ComputeEngine:
             self.deploy_job_to_host(hostname, job, psets)
             # Set host state as allocated
             self.cluster.hosts[hostname].state = Host.ALLOCATED
+
+        # Each host initially owns the same compact-equivalent work.
+        job.host_remaining_work = {
+            hostname: float(job.remaining_time) for hostname in job.assigned_hosts
+        }
+        job.host_speedups = {}
+        job.host_completion_times = {}
 
         # Add job to the executing list
         self.cluster.execution_list.append(job)
@@ -282,86 +303,71 @@ class ComputeEngine:
 
     # Simulation loop computations
     def goto_next_sim_state(self) -> None:
+        """Advance to the next arrival, local completion, or wall-time event."""
+        executing_jobs = {
+            job.get_signature(): job for job in self.cluster.execution_list
+        }
+        min_step = inf
 
-        self.debug_logger.debug("Begin executing the jobs in the execution list")
-
-        #NOTE: consider adding multithreading to
-        # 1) Job calculation for remaining time (reminder: the number of resources 
-        # also constrain the number of executing jobs, so it might not provide much)
-        # 2) Finding the minimum remaining execution time
-        # 3) Finding the minimum showup time in the preloaded queue (this is a more preferrable action
-        # at least in the beginning of a simulation)
-
-        # Recalculate the remaining time of jobs
-
-        # Find the minimum remaining execution time of the jobs currently executing
-        min_rem_time = inf
+        # Compute speedups before changing any work, so all jobs advance
+        # at rates derived from the same instantaneous interference state.
         for job in self.cluster.execution_list:
-            self.calculate_job_rem_time(job)
-            if job.remaining_time < min_rem_time:
-                min_rem_time = job.remaining_time
+            self.calculate_job_rem_time(job, executing_jobs)
+            for hostname, work in job.host_remaining_work.items():
+                if work > 0:
+                    min_step = min(min_step, work / job.host_speedups[hostname])
 
-        # Find the minimum remaining time for a job to show up in the waiting
-        # queue of the cluster
+            until_deadline = (
+                job.start_time + job.wall_time * (1 + self.wall_time_ratio)
+                - self.cluster.makespan
+            )
+            if until_deadline > 0:
+                min_step = min(min_step, until_deadline)
+
         for job in self.db.preloaded_queue:
-            showup_time = job.submit_time - self.cluster.makespan
-            if showup_time > 0 and showup_time < min_rem_time:
-                min_rem_time = showup_time
-            else:
-                # They are already sorted by increasing arrival time
+            until_arrival = job.submit_time - self.cluster.makespan
+            if until_arrival > 0:
+                min_step = min(min_step, until_arrival)
                 break
-        
-        if min_rem_time <= 0:
-            self.debug_logger.error(f"The minimum next simulation step time is {min_rem_time} <=0")
-        else:
-            self.debug_logger.debug(f"The minimum next simulation step time is {min_rem_time} seconds")
-        # Guard the execution
-        assert min_rem_time > 0
 
-        if min_rem_time == inf and (self.cluster.waiting_queue != [] or self.db.preloaded_queue != []):
-            print()
-            print(self.cluster.get_idle_cores())
-            print("PREL", self.db.preloaded_queue)
-            print("WAIT", self.cluster.waiting_queue)
-            print("EXEC", self.cluster.execution_list)
-            print()
-            self.debug_logger.error(f"There are jobs in the preloaded queue or waiting queue that have not being deployed for execution")
-            raise RuntimeError
+        if min_step == inf:
+            if self.cluster.waiting_queue or self.db.preloaded_queue:
+                raise RuntimeError("Jobs queued but none can advance")
+            return
 
-        # Forward the time of the execution
-        self.cluster.makespan += min_rem_time
-        self.debug_logger.debug(f"The new makespan is {self.cluster.makespan}")
+        assert min_step > 0
+        self.cluster.makespan += min_step
+        self.logger.log(evts.CompEngineNextTimeStep, msg=f"{min_step}")
 
-        # Log the event
-        self.logger.log(evts.CompEngineNextTimeStep, msg=f"{min_rem_time}")
-
-        # "Execute" the jobs
-        execution_list: list[Job] = list()
-
-        #INFO: consider multithreading the deletion of jobs
-        #WARN: pay attention to how the jobs are deleted from the host. 
-        # Dictionary access/deletion might not be thread safe
-
-        # Remove/clean any jobs that finished execution
+        still_executing = []
         for job in self.cluster.execution_list:
+            for hostname, work in job.host_remaining_work.items():
+                if work <= 0:
+                    continue
+                remaining = work - min_step * job.host_speedups[hostname]
+                if remaining <= 1e-9:
+                    remaining = 0.0
+                    job.host_completion_times[hostname] = self.cluster.makespan
+                    self.logger.log(
+                        evts.JobHostComputeComplete,
+                        msg=f"{job.get_signature()} on {hostname}",
+                    )
+                job.host_remaining_work[hostname] = remaining
 
-            # "Execute" job
-            job.remaining_time -= min_rem_time
-            
-            # If job surpassed the wall time then abort it
-            if job.start_time + job.wall_time * (1 + self.wall_time_ratio) <= self.cluster.makespan:
-                job.remaining_time = 0
+            job.remaining_time = max(0.0, job.remaining_time - min_step)
+            if (job.start_time + job.wall_time * (1 + self.wall_time_ratio)
+                    <= self.cluster.makespan + 1e-9):
                 job.current_state = JobState.ABORTED
+                job.remaining_time = 0.0
 
-            if job.remaining_time == 0:
+            if job.current_state == JobState.ABORTED or all(
+                    work <= 0 for work in job.host_remaining_work.values()):
+                job.remaining_time = 0.0
                 self.clean_job_from_hosts(job)
             else:
-                execution_list.append(job)
+                still_executing.append(job)
 
-        # Assign new execution list to cluster
-        self.cluster.execution_list = execution_list
-
-        self.debug_logger.debug("Finished executing the jobs in the execution list")
+        self.cluster.execution_list = still_executing
 
     def sim_step(self) -> None:
 
