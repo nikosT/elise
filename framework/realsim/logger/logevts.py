@@ -28,6 +28,14 @@ class JobFinish(LogEvent):
     def log(extra: str, sec: float) -> str:
         return LogEvent._log(f"Job finished execution [{extra}]", sec)
 
+class JobHostComputeComplete(LogEvent):
+    hook = "cluster_logs"
+
+    @staticmethod
+    def log(extra: str, sec: float) -> str:
+        return LogEvent._log(f"Host portion finished computing [{extra}]", sec)
+
+
 class JobDeployedToHost(LogEvent):
     hook = "cluster_logs"
     @staticmethod
