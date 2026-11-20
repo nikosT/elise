@@ -97,3 +97,25 @@ C4Component
    that would restructure a lot of code to integrate low level details about the
    clusters. (SoftEng)
 5. Optimizing simulation for faster results. (SoftEng)
+
+
+## Straggler-aware co-location timing
+
+The compute engine tracks progress independently on every allocated host of a
+spread MPI job. The job finishes when its **last host** completes. When another
+host finishes early, its ranks become computationally inactive and stop
+interfering with their co-located peers; allocated cores remain reserved
+until the whole MPI job finishes or is aborted.
+
+A job with no *active* peers on a host runs at its explicit
+`job.spread_speedup`, if provided. Otherwise, its spread-like performance is
+approximated using the best valid measured co-location speedup (the maximum
+positive finite entry in `db.heatmap[job.job_name]`), falling back to 1.0 if no
+measurement exists. Unknown **active** pairwise measurements continue to use
+`job.avg_speedup`.
+
+The model assumes equal compact-equivalent work per host, and that local MPI
+ranks waiting for a slower portion impose negligible computational interference.
+No cores are returned early, and rank migration is not modeled.
+`host_completion_times` records local completion events; completion of the
+whole job is recorded normally.
