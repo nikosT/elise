@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 import sys
 
 sys.path.append(os.path.abspath(
@@ -64,6 +65,13 @@ class Job:
         self.avg_speedup: float = 1
         self.max_speedup: float = 1
         self.min_speedup: float = 1
+        # Explicit spread speedup is optional; best measured co-location
+        # speedup becomes the fallback when no spread value is supplied.
+        self.spread_speedup: Optional[float] = None
+        self.host_remaining_work: dict[str, float] = {}
+        self.host_speedups: dict[str, float] = {}
+        self.host_completion_times: dict[str, float] = {}
+
 
         # Job tag for models
         self.job_tag = list()
@@ -94,6 +102,10 @@ class Job:
                 and self.avg_speedup == job.avg_speedup\
                 and self.max_speedup == job.max_speedup\
                 and self.min_speedup == job.min_speedup\
+                and self.spread_speedup == job.spread_speedup\
+                and self.host_remaining_work == job.host_remaining_work\
+                and self.host_speedups == job.host_speedups\
+                and self.host_completion_times == job.host_completion_times\
                 and self.job_tag == job.job_tag\
                 and self.job_character == job.job_character
 
@@ -133,6 +145,11 @@ class Job:
         copy.avg_speedup = self.avg_speedup
         copy.max_speedup = self.max_speedup
         copy.min_speedup = self.min_speedup
+        copy.spread_speedup = self.spread_speedup
+        copy.host_remaining_work = self.host_remaining_work.copy()
+        copy.host_speedups = self.host_speedups.copy()
+        copy.host_completion_times = self.host_completion_times.copy()
+
 
         copy.current_state = self.current_state
         copy.job_tag = self.job_tag
